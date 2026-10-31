@@ -18,8 +18,9 @@ public class MainActivity extends Activity {
     private GameViewport viewport;
     private FrameLayout root;
     private LinearLayout panel;
-    private TextView countdown, timerButton, bellButton;
-    private final TextView[] viewButtons=new TextView[4];
+    private TextView countdown, timerButton, bellBadge;
+    private final CompanionChrome.Icon[] viewButtons=new CompanionChrome.Icon[4];
+    private boolean adjustingPanel=false;
     private boolean expanded,original,fullscreen,landscape;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final Runnable clock=new Runnable(){public void run(){updateTimer();handler.postDelayed(this,1000);}};
@@ -74,102 +75,169 @@ public class MainActivity extends Activity {
         TextView t=label(name,13,true);t.setGravity(Gravity.CENTER);
         t.setBackgroundColor(0xFF243650);t.setOnClickListener(v->run.run());return t;
     }
+    private CompanionChrome.Icon iconButton(String name,String description,Runnable click){
+        CompanionChrome.Icon icon=new CompanionChrome.Icon(this,name);
+        icon.setContentDescription(description);
+        icon.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,false));
+        icon.setOnClickListener(v->click.run());
+        return icon;
+    }
+    private void addIcon(LinearLayout bar,CompanionChrome.Icon button,int weight){
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(46),weight);
+        lp.setMargins(dp(2),0,dp(2),0);
+        bar.addView(button,lp);
+    }
+    private void installDragHandle(LinearLayout parent){
+        CompanionChrome.Icon handle=new CompanionChrome.Icon(this,"handle");
+        handle.setContentDescription("Drag to move Companion");
+        handle.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,false));
+        parent.addView(handle,new LinearLayout.LayoutParams(dp(30),dp(46)));
+        final float[] initial={0,0};
+        final float[] translation={0,0};
+        handle.setOnTouchListener((v,e)->{
+            if(landscape)return false;
+            switch(e.getActionMasked()){
+                case MotionEvent.ACTION_DOWN:
+                    initial[0]=e.getRawX();initial[1]=e.getRawY();
+                    translation[0]=panel.getTranslationX();translation[1]=panel.getTranslationY();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    float dx=e.getRawX()-initial[0],dy=e.getRawY()-initial[1];
+                    // Full-width portrait bar: restrict movement to the vertical axis.
+                    panel.setTranslationY(Math.max(-availablePanelTravel(),Math.min(0,translation[1]+dy)));
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    getPreferences(0).edit().putFloat("portraitBarOffsetDp",
+                        panel.getTranslationY()/getResources().getDisplayMetrics().density).apply();
+                    return true;
+            }
+            return false;
+        });
+    }
+    private float availablePanelTravel(){
+        if(root==null||panel==null)return 0;
+        // Leave the bar below the system status area and inside the screen.
+        return Math.max(0,root.getHeight()-panel.getHeight()-dp(48));
+    }
+    private void updatePanelPosition(){
+        if(landscape||panel==null||root==null)return;
+        float saved=getPreferences(0).getFloat("portraitBarOffsetDp",0);
+        panel.setTranslationY(Math.max(-availablePanelTravel(),Math.min(0,dp(Math.round(saved)))));
+    }
     private void build(){
         landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
-        countdown=null;timerButton=null;bellButton=null;
+        countdown=null;timerButton=null;bellBadge=null;
         java.util.Arrays.fill(viewButtons,null);
         if(viewport.getParent()!=null)((android.view.ViewGroup)viewport.getParent()).removeView(viewport);
-        root=new FrameLayout(this);root.setBackgroundColor(Color.BLACK);
+        root=new FrameLayout(this);
+        root.setBackgroundColor(Color.BLACK);
         root.addView(viewport,new FrameLayout.LayoutParams(-1,-1));
-        viewport.setModes(landscape,original,(!landscape&&!original)?(expanded?220:52):0);
+        viewport.setModes(landscape,original,(!landscape&&!original)?(expanded?162:66):0);
         if(!original){
             panel=new LinearLayout(this);
             panel.setOrientation(LinearLayout.VERTICAL);
-            panel.setPadding(dp(10),dp(7),dp(10),dp(7));
-            panel.setBackgroundColor(0xEF07182C);
-            FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(
-                landscape?dp(expanded?265:72):-1,
+            panel.setPadding(dp(6),dp(6),dp(6),dp(6));
+            panel.setBackground(CompanionChrome.panel(getResources().getDisplayMetrics().density));
+            panel.setElevation(dp(10));
+            FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(
+                landscape?dp(expanded?270:88):-1,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM);
-            p.setMargins(dp(8),0,dp(8),dp(8));
-            root.addView(panel,p);
-            panel.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or_,ob)->{
-                if(!landscape&&!original && (b-t)!=(ob-ot)){
-                    float density=getResources().getDisplayMetrics().density;
-                    viewport.setReservedBottom(Math.round((b-t+dp(8))/density));
+            params.setMargins(dp(9),0,dp(9),dp(10));
+            root.addView(panel,params);
+            panel.addOnLayoutChangeListener((v,l,t,r,bottom,ol,ot,or_,ob)->{
+                if(!landscape&&!original){
+                    root.post(()->{
+                        updatePanelPosition();
+                        // Floating HUD does not permanently shrink the game canvas.
+                        // Docked HUD leaves enough space for its actual height.
+                        boolean docked=Math.abs(panel.getTranslationY())<dp(24);
+                        viewport.setReservedBottom(docked?
+                            Math.round((panel.getHeight()+dp(16))/getResources().getDisplayMetrics().density):0);
+                    });
                 }
             });
-            LinearLayout header=new LinearLayout(this);
-            header.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout bar=new LinearLayout(this);
+            bar.setGravity(Gravity.CENTER_VERTICAL);
             if(!landscape){
-                String[] names={"L","C","R","All"};
-                String[] hints={"Left view","Center view","Right view","Full game overview"};
-                for(int i=0;i<names.length;i++){
-                    final int choice=i;
-                    TextView preset=button(names[i],()->selectView(choice));
-                    preset.setTextSize(12);
-                    preset.setContentDescription(hints[i]);
-                    LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,dp(34),1);
-                    bp.setMargins(0,0,dp(3),0);
-                    header.addView(preset,bp);
-                    viewButtons[i]=preset;
+                String[] kinds={"left","center","right","overview"};
+                String[] names={"Left view","Center view","Right view","Full overview"};
+                for(int i=0;i<4;i++){
+                    final int selection=i;
+                    CompanionChrome.Icon icon=iconButton(kinds[i],names[i],()->selectView(selection));
+                    addIcon(bar,icon,1);
+                    viewButtons[i]=icon;
                 }
-                bellButton=button("🔔",this::showTimer);
-                bellButton.setContentDescription("Timers and notifications");
-                bellButton.setTextSize(16);
-                LinearLayout.LayoutParams bellParams=new LinearLayout.LayoutParams(dp(36),dp(34));
-                bellParams.setMargins(0,0,dp(3),0);
-                header.addView(bellButton,bellParams);
+                View divider=new View(this);divider.setBackgroundColor(0x6682C7E8);
+                LinearLayout.LayoutParams dl=new LinearLayout.LayoutParams(dp(1),dp(29));
+                dl.setMargins(dp(4),0,dp(4),0);bar.addView(divider,dl);
+                FrameLayout bell=new FrameLayout(this);
+                CompanionChrome.Icon bellIcon=iconButton("bell","Mission reminder",this::showTimer);
+                bell.addView(bellIcon,new FrameLayout.LayoutParams(-1,-1));
+                bellBadge=label("",10,true);bellBadge.setTextColor(Color.BLACK);
+                bellBadge.setGravity(Gravity.CENTER);bellBadge.setBackgroundColor(CompanionChrome.GOLD);
+                FrameLayout.LayoutParams badgeParams=new FrameLayout.LayoutParams(dp(17),dp(17),Gravity.RIGHT|Gravity.TOP);
+                bell.addView(bellBadge,badgeParams);
+                LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,dp(46),1);
+                bp.setMargins(dp(2),0,dp(2),0);bar.addView(bell,bp);
+                addIcon(bar,iconButton("settings","Settings",this::showSettings),1);
+                addIcon(bar,iconButton("rotate","Rotate screen",this::toggleOrientation),1);
+                View separator=new View(this);separator.setBackgroundColor(0x6682C7E8);
+                LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(dp(1),dp(29));
+                sp.setMargins(dp(2),0,dp(2),0);bar.addView(separator,sp);
+                addIcon(bar,iconButton(expanded?"collapse":"expand",
+                    expanded?"Collapse Companion":"Expand Companion",()->{
+                        expanded=!expanded;
+                        getPreferences(0).edit().putBoolean("expanded",expanded).apply();build();
+                    }),1);
+                installDragHandle(bar);
             }else{
-                header.addView(label(expanded?"SEAF COMPANION":"SEAF",14,true),
-                    new LinearLayout.LayoutParams(0,dp(34),1));
+                TextView name=label(expanded?"SEAF COMPANION":"SEAF",13,true);
+                bar.addView(name,new LinearLayout.LayoutParams(0,dp(46),1));
+                addIcon(bar,iconButton("rotate","Switch to portrait",()->applyOrientation(1)),1);
+                addIcon(bar,iconButton("settings","Settings",this::showSettings),1);
+                addIcon(bar,iconButton(expanded?"collapse":"expand",
+                    expanded?"Collapse":"Expand",()->{
+                        expanded=!expanded;getPreferences(0).edit().putBoolean("expanded",expanded).apply();build();
+                    }),1);
             }
-            TextView expandButton=button(expanded?"−":"+",()->{
-                expanded=!expanded;
-                getPreferences(0).edit().putBoolean("expanded",expanded).apply();
-                build();
-            });
-            expandButton.setContentDescription(expanded?"Collapse companion":"Expand companion");
-            header.addView(expandButton,new LinearLayout.LayoutParams(dp(39),dp(34)));
-            panel.addView(header);
+            panel.addView(bar);
             if(expanded){
-                countdown=label("No reminder",21,true);
-                panel.addView(countdown,new LinearLayout.LayoutParams(-1,dp(37)));
-                panel.addView(label("Local timer • Game state not synchronized",11,false));
+                View line=new View(this);line.setBackgroundColor(0x776B9CC0);
+                LinearLayout.LayoutParams lineParams=new LinearLayout.LayoutParams(-1,dp(1));
+                lineParams.setMargins(dp(9),dp(8),dp(9),dp(9));panel.addView(line,lineParams);
+                countdown=label("No active reminder",23,true);
+                countdown.setPadding(dp(10),0,dp(10),0);
+                panel.addView(countdown,new LinearLayout.LayoutParams(-1,dp(40)));
+                TextView note=label("Manual reminder  •  SEAF not synchronized",11,false);
+                note.setTextColor(CompanionChrome.WHITE);
+                note.setPadding(dp(10),0,0,dp(7));
+                panel.addView(note);
                 LinearLayout actions=new LinearLayout(this);
-                timerButton=button("Timers",this::showTimer);
-                actions.addView(timerButton,new LinearLayout.LayoutParams(0,dp(37),1));
-                actions.addView(button("Settings",this::showSettings),new LinearLayout.LayoutParams(0,dp(37),1));
+                timerButton=button("Edit Reminder",this::showTimer);
+                timerButton.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,false));
+                actions.addView(timerButton,new LinearLayout.LayoutParams(0,dp(43),1));
+                TextView fullscreenButton=button(fullscreen?"Exit Fullscreen":"Fullscreen",()->setFullscreen(!fullscreen));
+                fullscreenButton.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,false));
+                actions.addView(fullscreenButton,new LinearLayout.LayoutParams(0,dp(43),1));
                 panel.addView(actions);
-                if(landscape) {
-                    LinearLayout orientation=new LinearLayout(this);
-                    orientation.addView(button("Portrait",()->applyOrientation(1)),
-                        new LinearLayout.LayoutParams(0,dp(38),1));
-                    orientation.addView(button("Rotate",this::toggleOrientation),
-                        new LinearLayout.LayoutParams(0,dp(38),1));
-                    panel.addView(orientation);
-                }
-                if(!landscape){
-                    LinearLayout nav=new LinearLayout(this);
-                    nav.addView(button("Rotate",this::toggleOrientation),
-                        new LinearLayout.LayoutParams(0,dp(36),1));
-                    nav.addView(button("Fullscreen",()->setFullscreen(!fullscreen)),
-                        new LinearLayout.LayoutParams(0,dp(36),1));
-                    panel.addView(nav);
-                }
             }
             if(landscape&&!expanded){
-                TextView returnPortrait=button("↻",()->applyOrientation(1));
-                FrameLayout.LayoutParams rp=new FrameLayout.LayoutParams(dp(46),dp(46),Gravity.TOP|Gravity.RIGHT);
-                rp.setMargins(0,dp(10),dp(10),0);
-                root.addView(returnPortrait,rp);
+                // Always-available orientation escape for any landscape lock.
+                CompanionChrome.Icon back=iconButton("rotate","Return to portrait",()->applyOrientation(1));
+                FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(dp(45),dp(45),Gravity.RIGHT|Gravity.TOP);
+                p.setMargins(0,dp(8),dp(8),0);root.addView(back,p);
             }
         }else{
             TextView restore=button("Companion",()->setOriginal(false));
-            FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(dp(105),dp(42),Gravity.RIGHT|Gravity.BOTTOM);
+            restore.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,false));
+            FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(dp(116),dp(43),Gravity.RIGHT|Gravity.BOTTOM);
             p.setMargins(0,0,dp(12),dp(20));root.addView(restore,p);
         }
-        setContentView(root);updateZoom();updateTimer();
+        setContentView(root);
+        if(!landscape&&!original)root.post(this::updatePanelPosition);
+        updateViewButtons();updateTimer();
     }
     private void selectView(int index){
         if(viewport==null||landscape||original)return;
@@ -181,17 +249,17 @@ public class MainActivity extends Activity {
         if(viewport==null)return;
         int selected=viewport.isHeightFit()?viewport.getFocusRegion():3;
         for(int i=0;i<viewButtons.length;i++){
-            TextView b=viewButtons[i];
-            if(b!=null)b.setBackgroundColor(i==selected?0xFF246482:0xFF243650);
+            CompanionChrome.Icon b=viewButtons[i];
+            if(b!=null)b.setSelectedState(i==selected);
         }
     }
     private void updateZoom(){updateViewButtons();}
     private void updateTimer(){
         java.util.ArrayList<ReminderScheduler.Reminder> reminders=ReminderScheduler.list(this);
-        if(timerButton!=null)timerButton.setText("Timers ("+reminders.size()+")");
-        if(bellButton!=null){
-            bellButton.setText(reminders.isEmpty()?"🔔":"🔔"+reminders.size());
-            bellButton.setContentDescription("Timers and notifications, "+reminders.size()+" active");
+        if(timerButton!=null)timerButton.setText(reminders.isEmpty()?"Set Reminder":"Edit Reminder");
+        if(bellBadge!=null){
+            bellBadge.setText(reminders.isEmpty()?"":"1");
+            bellBadge.setVisibility(reminders.isEmpty()?View.GONE:View.VISIBLE);
         }
         if(countdown==null)return;
         if(reminders.isEmpty()){countdown.setText("No active reminders");return;}
