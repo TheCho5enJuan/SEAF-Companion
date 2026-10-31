@@ -77,7 +77,7 @@ public final class ReminderScheduler {
     }
     private static void cancelAlarm(Context c,Reminder r){
         AlarmManager a=(AlarmManager)c.getSystemService(Context.ALARM_SERVICE);
-        if(a!=null)a.cancel(pending(c,r.id,r.label));
+        if(a!=null)a.cancel(pending(c,r.id,r.label,r.due));
     }
     public static synchronized Reminder schedule(Context c,long due,String label){
         migrateLegacy(c);
@@ -104,7 +104,7 @@ public final class ReminderScheduler {
         for(Reminder r:all){
             if(r.id==id){
                 AlarmManager a=(AlarmManager)c.getSystemService(Context.ALARM_SERVICE);
-                if(a!=null)a.cancel(pending(c,r.id,r.label));
+                if(a!=null)a.cancel(pending(c,r.id,r.label,r.due));
                 break;
             }
         }
@@ -123,7 +123,7 @@ public final class ReminderScheduler {
         migrateLegacy(c);
         for(Reminder r:load(c)){
             if(r.due>System.currentTimeMillis())arm(c,r);
-            else finish(c,r.id);
+            else finish(c,r.id,r.due);
         }
     }
     private static void migrateLegacy(Context c){
