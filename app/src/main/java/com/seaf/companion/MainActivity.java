@@ -18,7 +18,6 @@ public class MainActivity extends Activity {
     private FrameLayout base;
     private LinearLayout pane;
     private TextView countdown;
-    private SessionRecorder recorder;
     private final Handler tick = new Handler(Looper.getMainLooper());
     private boolean expanded;
     private boolean landscape;
@@ -46,7 +45,6 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-        recorder=new SessionRecorder(this,web);
         expanded=getPreferences(0).getBoolean("expanded",true);
         build();
         tick.post(clock);
@@ -89,11 +87,8 @@ public class MainActivity extends Activity {
             pane.addView(text("Local reminder · SEAF sync not connected",11,false));
             LinearLayout actions=new LinearLayout(this);actions.setPadding(0,dp(8),0,0);
             TextView timers=control("Timer",this::showTimer);
-            TextView capture=control(recorder.isRecording()?"Stop + ZIP":"Capture",()->{
-                if(recorder.isRecording())recorder.stop();else recorder.start();build();
-            });
             TextView settings=control("Settings",this::showSettings);
-            for(TextView v:new TextView[]{timers,capture,settings}){
+            for(TextView v:new TextView[]{timers,settings}){
                 LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(40),1);
                 p.setMargins(dp(2),0,dp(2),0);actions.addView(v,p);
             }
@@ -131,13 +126,12 @@ public class MainActivity extends Activity {
           }).setNegativeButton("Close",null).show();
     }
     private void showSettings(){
-        String[] options={"Notification settings","Battery/background settings","Mobile data settings","Refresh original game","Start/stop screen capture"};
+        String[] options={"Notification settings","Battery/background settings","Mobile data settings","Refresh original game"};
         new AlertDialog.Builder(this).setTitle("Companion settings").setItems(options,(d,which)->{
             if(which==0)openSettings(Settings.ACTION_APP_NOTIFICATION_SETTINGS,"android.provider.extra.APP_PACKAGE");
             if(which==1)openSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,null);
             if(which==2)openSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,null);
             if(which==3)web.reload();
-            if(which==4){if(recorder.isRecording())recorder.stop();else recorder.start();build();}
         }).setNegativeButton("Close",null).show();
     }
     private void openSettings(String action,String extra){
@@ -151,5 +145,5 @@ public class MainActivity extends Activity {
     @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);build();}
     @Override public void onBackPressed(){if(web.canGoBack())web.goBack();else super.onBackPressed();}
     @Override protected void onPause(){CookieManager.getInstance().flush();super.onPause();}
-    @Override protected void onDestroy(){tick.removeCallbacks(clock);recorder.close();web.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){tick.removeCallbacks(clock);web.destroy();super.onDestroy();}
 }
