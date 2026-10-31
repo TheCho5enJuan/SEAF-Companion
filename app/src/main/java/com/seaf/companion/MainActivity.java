@@ -508,7 +508,7 @@ public class MainActivity extends Activity {
                 left/3600,left/60%60,left%60));
             handler.postDelayed(redrawTime[0],1000);
         };
-        dialog.setOnDismissListener(d->handler.removeCallbacks(redrawTime[0]));
+        dialog.setOnDismissListener(d->{handler.removeCallbacks(redrawTime[0]);dialogClosed();});
         View separator=new View(this);
         separator.setBackgroundColor(0x7089B9DE);
         LinearLayout.LayoutParams split=new LinearLayout.LayoutParams(-1,dp(1));
@@ -640,7 +640,7 @@ public class MainActivity extends Activity {
                 attrs.dimAmount=.58f;window.setAttributes(attrs);
             }
         });
-        dialog.show();
+        dialogOpened();dialog.show();
         if(active!=null)handler.postDelayed(redrawTime[0],1000);
     }
     private void applyAmbient(){
@@ -691,13 +691,62 @@ public class MainActivity extends Activity {
             ambientBufferIndex=1-ambientBufferIndex;
         }catch(Exception ignored){}
     }
+    private void chooseAutoHide(){
+        final int[] values={0,5,10,15,30};
+        String[] choices={"Off","5 seconds","10 seconds","15 seconds","30 seconds"};
+        int saved=getPreferences(0).getInt(AUTO_HIDE,0),selected=0;
+        for(int i=0;i<values.length;i++)if(values[i]==saved)selected=i;
+        AlertDialog dialog=new AlertDialog.Builder(this)
+            .setTitle("Auto-hide after inactivity")
+            .setSingleChoiceItems(choices,selected,(d,index)->{
+                getPreferences(0).edit().putInt(AUTO_HIDE,values[index]).apply();
+                d.dismiss();scheduleAutoHide();
+            }).setNegativeButton("Cancel",null).create();
+        dialog.setOnDismissListener(d->dialogClosed());
+        dialogOpened();dialog.show();
+    }
+    private void chooseOpacity(){
+        int old=Math.round(hudOpacity*100);
+        LinearLayout content=new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(24),dp(10),dp(24),dp(8));
+        TextView amount=dialogLabel(old+"%",18);
+        amount.setGravity(Gravity.CENTER);
+        content.addView(amount);
+        SeekBar slider=new SeekBar(this);
+        slider.setMax(80);slider.setProgress(old-20);
+        content.addView(slider);
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            public void onProgressChanged(SeekBar bar,int progress,boolean user){
+                int value=progress+20;
+                amount.setText(value+"%");
+                setHudOpacity(value/100f);
+            }
+            public void onStartTrackingTouch(SeekBar bar){}
+            public void onStopTrackingTouch(SeekBar bar){}
+        });
+        AlertDialog dialog=new AlertDialog.Builder(this)
+            .setTitle("Overlay opacity").setView(content)
+            .setPositiveButton("Save",(d,which)->getPreferences(0).edit()
+                .putInt(HUD_OPACITY,slider.getProgress()+20).apply())
+            .setNegativeButton("Cancel",(d,which)->setHudOpacity(old/100f)).create();
+        dialog.setOnCancelListener(d->setHudOpacity(old/100f));
+        dialog.setOnDismissListener(d->dialogClosed());
+        dialogOpened();dialog.show();
+    }
     private void showSettings(){
+        SharedPreferences prefs=getPreferences(0);
+        int auto=prefs.getInt(AUTO_HIDE,0);
         String[] opts={"Original game mode","Auto rotate","Lock portrait","Lock landscape",
-            "Toggle fullscreen","Remember zoom: "+(getPreferences(0).getBoolean("rememberZoom",true)?"On":"Off"),
-            "Auto center: "+(getPreferences(0).getBoolean("autoCenter",true)?"On":"Off"),
+            "Toggle fullscreen","Remember zoom: "+(prefs.getBoolean("rememberZoom",true)?"On":"Off"),
+            "Auto center: "+(prefs.getBoolean("autoCenter",true)?"On":"Off"),
             "Mission notification sound","Android battery settings","Refresh game","Open game in browser",
-            "Live ambient blur: "+(ambientEnabled?"On":"Off")};
-        new AlertDialog.Builder(this).setTitle("SEAF Companion Settings")
+            "Live ambient blur: "+(ambientEnabled?"On":"Off"),
+            "Remember position: "+(prefs.getBoolean(REMEMBER_HUD,true)?"On":"Off"),
+            "Edge snapping: "+(prefs.getBoolean(EDGE_SNAP,false)?"On":"Off"),
+            "Auto-hide: "+(auto==0?"Off":auto+" seconds"),
+            "Overlay opacity: "+Math.round(hudOpacity*100)+"%"};
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("SEAF Companion Settings")
           .setItems(opts,(d,which)->{
               switch(which){
                 case 0:setOriginal(true);break;
@@ -705,8 +754,8 @@ public class MainActivity extends Activity {
                 case 2:applyOrientation(1);break;
                 case 3:applyOrientation(2);break;
                 case 4:setFullscreen(!fullscreen);break;
-                case 5:viewport.setRememberZoom(!getPreferences(0).getBoolean("rememberZoom",true));break;
-                case 6:viewport.setAutoCenter(!getPreferences(0).getBoolean("autoCenter",true));break;
+                case 5:viewport.setRememberZoom(!prefs.getBoolean("rememberZoom",true));break;
+                case 6:viewport.setAutoCenter(!prefs.getBoolean("autoCenter",true));break;
                 case 7:try{
                     Intent i=new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS);
                     i.putExtra(Settings.EXTRA_APP_PACKAGE,getPackageName());
@@ -714,12 +763,27 @@ public class MainActivity extends Activity {
                 }catch(Exception ex){openAppSettings();}break;
                 case 8:openAppSettings();break;
                 case 9:web.reload();break;
-                case 10:startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(web.getUrl()==null?"https://seaf.se/":web.getUrl())));break;
+                case 10:startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(
+                    web.getUrl()==null?"https://seaf.se/":web.getUrl())));break;
                 case 11:ambientEnabled=!ambientEnabled;
-                    getPreferences(0).edit().putBoolean("ambientBlurEnabled",ambientEnabled).apply();
+                    prefs.edit().putBoolean("ambientBlurEnabled",ambientEnabled).apply();
                     applyAmbient();break;
+                case 12:
+                    boolean remember=!prefs.getBoolean(REMEMBER_HUD,true);
+                    SharedPreferences.Editor editor=prefs.edit().putBoolean(REMEMBER_HUD,remember);
+                    if(!remember)editor.remove("portraitBarOffsetXDp").remove("portraitBarOffsetDp")
+                        .remove("landscapeBarOffsetXDp").remove("landscapeBarOffsetDp");
+                    editor.apply();
+                    if(panel!=null)updatePanelPosition();
+                    break;
+                case 13:prefs.edit().putBoolean(EDGE_SNAP,
+                    !prefs.getBoolean(EDGE_SNAP,false)).apply();break;
+                case 14:chooseAutoHide();break;
+                case 15:chooseOpacity();break;
               }
-          }).setNegativeButton("Close",null).show();
+          }).setNegativeButton("Close",null).create();
+        dialog.setOnDismissListener(d->dialogClosed());
+        dialogOpened();dialog.show();
     }
     private void openAppSettings(){
         Intent i=new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
@@ -755,12 +819,14 @@ public class MainActivity extends Activity {
         super.onResume();
         ambientForeground=true;
         if(ambientEnabled)handler.post(this::applyAmbient);
+        scheduleAutoHide();
     }
     @Override protected void onPause(){
         ambientForeground=false;
         handler.removeCallbacks(ambientTick);
+        handler.removeCallbacks(autoHideTask);
         CookieManager.getInstance().flush();
         super.onPause();
     }
-    @Override protected void onDestroy(){handler.removeCallbacks(clock);handler.removeCallbacks(ambientTick);web.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){handler.removeCallbacks(clock);handler.removeCallbacks(ambientTick);handler.removeCallbacks(autoHideTask);web.destroy();super.onDestroy();}
 }
