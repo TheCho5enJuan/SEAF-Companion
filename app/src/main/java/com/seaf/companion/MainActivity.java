@@ -198,8 +198,7 @@ public class MainActivity extends Activity {
         long remaining=Math.max(0,reminders.get(0).due-System.currentTimeMillis())/1000;
         String time=String.format(Locale.US,"%02d:%02d:%02d",
             remaining/3600,remaining/60%60,remaining%60);
-        countdown.setText((remaining==0?"Due now":time)+
-            (reminders.size()>1?"  +"+(reminders.size()-1)+" more":""));
+        countdown.setText(remaining==0?"Due now":time);
     }
     private TextView dialogLabel(String text,int size){
         TextView t=new TextView(this);
@@ -216,7 +215,7 @@ public class MainActivity extends Activity {
             System.currentTimeMillis()+minutes*60000L,
             category+" ("+minutes+"m)");
         if(reminder==null){
-            Toast.makeText(this,"Maximum 12 active reminders",Toast.LENGTH_LONG).show();
+            Toast.makeText(this,"Unable to set reminder",Toast.LENGTH_LONG).show();
             return;
         }
         if(Build.VERSION.SDK_INT>=33 &&
@@ -274,7 +273,7 @@ public class MainActivity extends Activity {
         });
         custom.addView(add,new LinearLayout.LayoutParams(dp(86),dp(42)));
         body.addView(custom);
-        body.addView(dialogLabel("Active reminders",17));
+        body.addView(dialogLabel("Current reminder (selecting a preset replaces it)",17));
         java.util.ArrayList<ReminderScheduler.Reminder> active=ReminderScheduler.list(this);
         if(active.isEmpty())body.addView(dialogLabel("None yet",13));
         for(ReminderScheduler.Reminder r:active){
@@ -296,7 +295,7 @@ public class MainActivity extends Activity {
         body.addView(dialogLabel("Android may delay alerts when exact alarms are restricted. "+
             "You can change the alert sound in Companion Settings.",12));
         current[0]=new AlertDialog.Builder(this)
-            .setTitle("SEAF Timers")
+            .setTitle("SEAF Reminder")
             .setView(scroll)
             .setNegativeButton("Close",null)
             .create();
