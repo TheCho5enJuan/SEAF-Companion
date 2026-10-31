@@ -53,14 +53,9 @@ public class MainActivity extends Activity {
                     openBrowser(uri);
                     return true;
                 }
-                String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(java.util.Locale.ROOT);
-                if (host.equals("discord.com") || host.equals("discordapp.com") ||
-                    host.endsWith(".playstation.com") || host.endsWith(".sony.com") ||
-                    host.equals("login.live.com") || host.equals("account.microsoft.com") ||
-                    host.equals("xbox.com")) {
-                    openBrowser(uri);
-                    return true;
-                }
+                // Keep OAuth authorization and its HTTPS callback in this WebView.
+                // The external browser has a separate cookie jar and cannot return
+                // ownership of seaf.se to this third-party Android application.
                 return false;
             }
         });
@@ -101,7 +96,7 @@ public class MainActivity extends Activity {
         popup.getMenu().add("Zoom in").setOnMenuItemClickListener(i -> { webView.zoomIn(); return true; });
         popup.getMenu().add("Zoom out").setOnMenuItemClickListener(i -> { webView.zoomOut(); return true; });
         popup.getMenu().add("Refresh").setOnMenuItemClickListener(i -> { webView.reload(); return true; });
-        popup.getMenu().add("Open in browser").setOnMenuItemClickListener(i -> {
+        popup.getMenu().add("Browser login (fallback)").setOnMenuItemClickListener(i -> {
             openBrowser(Uri.parse(webView.getUrl() == null ? GAME_URL : webView.getUrl())); return true;
         });
         popup.show();
