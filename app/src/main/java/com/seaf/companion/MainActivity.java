@@ -15,6 +15,37 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     private WebView web;
+    private boolean zoomRestored = false;
+    private float savedPortraitScale = 0f;
+    private final Handler zoomHandler = new Handler(Looper.getMainLooper());
+    private final Runnable saveZoom = () -> {
+        if(zoomRestored && !landscape && web != null) {
+            float scale=web.getScale();
+            if(Float.isFinite(scale) && scale>=0.15f && scale<=5f) {
+                savedPortraitScale=scale;
+                getPreferences(0).edit().putFloat("savedPortraitScale",scale).apply();
+            }
+        }
+    };
+    private class RememberingWebView extends WebView {
+        RememberingWebView(Context context){super(context);}
+        @Override protected void onScaleChanged(float oldScale,float newScale){
+            super.onScaleChanged(oldScale,newScale);
+            if(zoomRestored && !landscape) {
+                zoomHandler.removeCallbacks(saveZoom);
+                zoomHandler.postDelayed(saveZoom,450);
+            }
+        }
+    }
+    private void restoreZoom(){
+        if(landscape){zoomRestored=true;return;}
+        zoomHandler.removeCallbacks(saveZoom);
+        if(savedPortraitScale >= 0.15f) {
+            float current=web.getScale();
+            if(current>0) web.zoomBy(Math.max(0.01f,Math.min(4.99f,savedPortraitScale/current)));
+        }
+        zoomRestored=true;
+    }
     private FrameLayout base;
     private LinearLayout pane;
     private TextView countdown;
@@ -28,7 +59,8 @@ public class MainActivity extends Activity {
         super.onCreate(b);
         getWindow().setStatusBarColor(0xFF07182C);
         getWindow().setNavigationBarColor(0xFF07182C);
-        web=new WebView(this);
+        savedPortraitScale=getPreferences(0).getFloat("savedPortraitScale",0f);
+        web=new RememberingWebView(this);
         WebSettings s=web.getSettings();
         s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);
         s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);
@@ -39,6 +71,8 @@ public class MainActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient());
         web.setInitialScale(0);
         web.setWebViewClient(new WebViewClient(){
+            @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap favicon){zoomRestored=false;}
+            @Override public void onPageFinished(WebView v,String url){v.postDelayed(()->restoreZoom(),500);}
             @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){
                 String scheme=r.getUrl().getScheme();
                 if("https".equals(scheme)||"http".equals(scheme))return false;
@@ -113,6 +147,9 @@ public class MainActivity extends Activity {
     private void resetOverview(){
         // Reload only on explicit Overview action, preserving existing cookies.
         web.getSettings().setLoadWithOverviewMode(true);
+        savedPortraitScale=0f;
+        getPreferences(0).edit().remove("savedPortraitScale").apply();
+        zoomRestored=false;
         web.setInitialScale(0);
         web.reload();
     }
@@ -170,5 +207,5 @@ public class MainActivity extends Activity {
     @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);build();}
     @Override public void onBackPressed(){if(web.canGoBack())web.goBack();else super.onBackPressed();}
     @Override protected void onPause(){CookieManager.getInstance().flush();super.onPause();}
-    @Override protected void onDestroy(){tick.removeCallbacks(clock);web.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){tick.removeCallbacks(clock);zoomHandler.removeCallbacks(saveZoom);web.destroy();super.onDestroy();}
 }
