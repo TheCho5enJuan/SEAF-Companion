@@ -352,15 +352,29 @@ public class MainActivity extends Activity {
         detail.setTextColor(CompanionChrome.WHITE);
         LinearLayout.LayoutParams infoLp=new LinearLayout.LayoutParams(-1,dp(29));
         body.addView(detail,infoLp);
-        final TextView clock=label(active==null?"No timer running":"",29,true);
+        final TextView clock=label(active==null?"No timer running":"",32,true);
         clock.setGravity(Gravity.CENTER);
         clock.setTextColor(CompanionChrome.WHITE);
         body.addView(clock,new LinearLayout.LayoutParams(-1,dp(60)));
         if(active!=null){
             long remaining=Math.max(0,active.due-System.currentTimeMillis())/1000;
-            clock.setText(String.format(Locale.US,"%02d:%02d:%02d remaining",
+            clock.setText(String.format(Locale.US,"%02d:%02d:%02d",
                 remaining/3600,remaining/60%60,remaining%60));
         }
+        TextView durationDetail=label(active==null?
+            "Select a duration to start":"Active timer · "+active.label.replace("Mission ",""),12,false);
+        durationDetail.setGravity(Gravity.CENTER);
+        durationDetail.setTextColor(0xFFAAC5E2);
+        body.addView(durationDetail,new LinearLayout.LayoutParams(-1,dp(24)));
+        final Runnable[] redrawTime={null};
+        redrawTime[0]=()->{
+            if(!dialog.isShowing()||active==null)return;
+            long left=Math.max(0,(active.due-System.currentTimeMillis())/1000);
+            clock.setText(String.format(Locale.US,"%02d:%02d:%02d",
+                left/3600,left/60%60,left%60));
+            handler.postDelayed(redrawTime[0],1000);
+        };
+        dialog.setOnDismissListener(d->handler.removeCallbacks(redrawTime[0]));
         View separator=new View(this);
         separator.setBackgroundColor(0x7089B9DE);
         LinearLayout.LayoutParams split=new LinearLayout.LayoutParams(-1,dp(1));
@@ -414,11 +428,25 @@ public class MainActivity extends Activity {
             }
             public void afterTextChanged(android.text.Editable e){}
         });
-        // Default highlighted preset is 15 minutes, matching the mockup.
-        chosen[0]=15;
+        // Reflect the actual saved duration, not the mockup's 15-minute choice.
+        // Preserve exact configured minutes in the reminder label even as time elapses.
+        int savedMinutes=0;
+        if(active!=null){
+            java.util.regex.Matcher matcher=java.util.regex.Pattern
+                .compile("\\((\\d+)m\\)").matcher(active.label);
+            if(matcher.find()){
+                try{savedMinutes=Integer.parseInt(matcher.group(1));}
+                catch(NumberFormatException ignored){}
+            }
+        }
+        int matched=-1;
+        for(int j=0;j<values.length;j++)if(values[j]==savedMinutes)matched=j;
+        chosen[0]=matched>=0?savedMinutes:0;
+        if(active!=null&&savedMinutes>0&&matched<0)
+            custom.setText(Integer.toString(savedMinutes));
         for(int j=0;j<4;j++)
             presets[j].setBackground(CompanionChrome.glass(
-                getResources().getDisplayMetrics().density,j==1));
+                getResources().getDisplayMetrics().density,j==matched));
 
         LinearLayout actions=new LinearLayout(this);
         if(active!=null){
@@ -479,6 +507,7 @@ public class MainActivity extends Activity {
             }
         });
         dialog.show();
+        if(active!=null)handler.postDelayed(redrawTime[0],1000);
     }
     private void showSettings(){
         String[] opts={"Original game mode","Auto rotate","Lock portrait","Lock landscape",
