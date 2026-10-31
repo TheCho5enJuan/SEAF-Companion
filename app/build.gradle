@@ -2,6 +2,10 @@ plugins { id 'com.android.application' }
 android {
     namespace 'com.seaf.companion'
     compileSdk 35
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
     defaultConfig {
         applicationId 'com.seaf.companion'
         minSdk 26
