@@ -186,7 +186,7 @@ public class MainActivity extends Activity {
             try {
                 Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
                 webView.draw(new Canvas(bitmap));
-                Uri image = createExport(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                Uri image = createExport(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                         "seaf-" + stamp + ".png", "image/png");
                 try (OutputStream out = getContentResolver().openOutputStream(image)) {
                     if (out == null || !bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
