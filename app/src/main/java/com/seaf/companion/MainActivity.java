@@ -36,6 +36,7 @@ public class MainActivity extends Activity {
     private FrameLayout root;
     private boolean immersive = true;
     private SessionRecorder recorder;
+    private CompanionDashboard dashboard;
     private boolean portraitFit = false;
     private final Handler layoutHandler = new Handler(Looper.getMainLooper());
     private final Runnable layoutTick = new Runnable() {
@@ -64,6 +65,7 @@ public class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setWebChromeClient(new WebChromeClient());
         recorder = new SessionRecorder(this, webView);
+        dashboard = new CompanionDashboard(this, () -> {}, () -> {portraitFit=false;getPreferences(0).edit().putBoolean("portraitFit",false).apply();applyPortraitFit();});
         webView.setWebViewClient(new WebViewClient() {
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
@@ -110,6 +112,8 @@ public class MainActivity extends Activity {
     }
     private void showMenu(View anchor) {
         PopupMenu popup = new PopupMenu(this, anchor);
+        popup.getMenu().add("Companion Dashboard").setOnMenuItemClickListener(i -> {dashboard.show();return true;});
+        popup.getMenu().add("Original Game (reset portrait fit)").setOnMenuItemClickListener(i -> {portraitFit=false;getPreferences(0).edit().putBoolean("portraitFit",false).apply();applyPortraitFit();return true;});
         popup.getMenu().add("Auto rotate").setOnMenuItemClickListener(i -> { setOrientation(0); return true; });
         popup.getMenu().add("Portrait").setOnMenuItemClickListener(i -> { setOrientation(1); return true; });
         popup.getMenu().add("Landscape").setOnMenuItemClickListener(i -> { setOrientation(2); return true; });
