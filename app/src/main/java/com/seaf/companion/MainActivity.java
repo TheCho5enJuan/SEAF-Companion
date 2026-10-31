@@ -42,6 +42,12 @@ public class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptThirdPartyCookies(web,true);
         web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new WebViewClient(){
+            @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){
+                if(viewport!=null)viewport.onPageStarted();
+            }
+            @Override public void onPageFinished(WebView v,String url){
+                if(viewport!=null)viewport.onPageFinished();
+            }
             @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){
                 Uri u=r.getUrl();String scheme=u.getScheme();
                 if("https".equals(scheme)||"http".equals(scheme))return false;
