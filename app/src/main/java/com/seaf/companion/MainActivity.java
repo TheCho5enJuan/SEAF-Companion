@@ -18,10 +18,9 @@ public class MainActivity extends Activity {
     private GameViewport viewport;
     private FrameLayout root;
     private LinearLayout panel;
-    private TextView countdown, zoomLabel, viewLabel, zoomToggle, timerButton;
-    private SeekBar slider;
-    private boolean expanded,zoomExpanded,original,fullscreen,landscape;
-    private boolean changingSlider=false;
+    private TextView countdown, timerButton, bellButton;
+    private final TextView[] viewButtons=new TextView[4];
+    private boolean expanded,original,fullscreen,landscape;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final Runnable clock=new Runnable(){public void run(){updateTimer();handler.postDelayed(this,1000);}};
     private int dp(int n){return (int)(getResources().getDisplayMetrics().density*n+0.5f);}
@@ -29,7 +28,6 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         getWindow().setStatusBarColor(0xFF07182C);getWindow().setNavigationBarColor(0xFF07182C);
         expanded=getPreferences(0).getBoolean("expanded",false);
-        zoomExpanded=getPreferences(0).getBoolean("zoomExpanded",false);
         original=getPreferences(0).getBoolean("originalMode",false);
         fullscreen=getPreferences(0).getBoolean("fullscreenMode",false);
         web=new WebView(this);
@@ -78,7 +76,8 @@ public class MainActivity extends Activity {
     }
     private void build(){
         landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
-        slider=null;zoomLabel=null;viewLabel=null;countdown=null;zoomToggle=null;timerButton=null;
+        countdown=null;timerButton=null;bellButton=null;
+        java.util.Arrays.fill(viewButtons,null);
         if(viewport.getParent()!=null)((android.view.ViewGroup)viewport.getParent()).removeView(viewport);
         root=new FrameLayout(this);root.setBackgroundColor(Color.BLACK);
         root.addView(viewport,new FrameLayout.LayoutParams(-1,-1));
@@ -100,11 +99,38 @@ public class MainActivity extends Activity {
                     viewport.setReservedBottom(Math.round((b-t+dp(8))/density));
                 }
             });
-            LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
-            header.addView(label(expanded?"SEAF COMPANION":"SEAF",14,true),new LinearLayout.LayoutParams(0,dp(34),1));
-            header.addView(button(expanded?"−":"+",()->{
-                expanded=!expanded;getPreferences(0).edit().putBoolean("expanded",expanded).apply();build();
-            }),new LinearLayout.LayoutParams(dp(48),dp(34)));
+            LinearLayout header=new LinearLayout(this);
+            header.setGravity(Gravity.CENTER_VERTICAL);
+            if(!landscape){
+                String[] names={"L","C","R","All"};
+                String[] hints={"Left view","Center view","Right view","Full game overview"};
+                for(int i=0;i<names.length;i++){
+                    final int choice=i;
+                    TextView preset=button(names[i],()->selectView(choice));
+                    preset.setTextSize(12);
+                    preset.setContentDescription(hints[i]);
+                    LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,dp(34),1);
+                    bp.setMargins(0,0,dp(3),0);
+                    header.addView(preset,bp);
+                    viewButtons[i]=preset;
+                }
+                bellButton=button("🔔",this::showTimer);
+                bellButton.setContentDescription("Timers and notifications");
+                bellButton.setTextSize(16);
+                LinearLayout.LayoutParams bellParams=new LinearLayout.LayoutParams(dp(36),dp(34));
+                bellParams.setMargins(0,0,dp(3),0);
+                header.addView(bellButton,bellParams);
+            }else{
+                header.addView(label(expanded?"SEAF COMPANION":"SEAF",14,true),
+                    new LinearLayout.LayoutParams(0,dp(34),1));
+            }
+            TextView expandButton=button(expanded?"−":"+",()->{
+                expanded=!expanded;
+                getPreferences(0).edit().putBoolean("expanded",expanded).apply();
+                build();
+            });
+            expandButton.setContentDescription(expanded?"Collapse companion":"Expand companion");
+            header.addView(expandButton,new LinearLayout.LayoutParams(dp(39),dp(34)));
             panel.addView(header);
             if(expanded){
                 countdown=label("No reminder",21,true);
@@ -124,48 +150,11 @@ public class MainActivity extends Activity {
                     panel.addView(orientation);
                 }
                 if(!landscape){
-                    zoomToggle=button("Zoom ▾",()->{
-                        zoomExpanded=!zoomExpanded;
-                        getPreferences(0).edit().putBoolean("zoomExpanded",zoomExpanded).apply();
-                        build();
-                    });
-                    panel.addView(zoomToggle,new LinearLayout.LayoutParams(-1,dp(36)));
-                    if(zoomExpanded){
-                    viewLabel=label("View",12,true);
-                    panel.addView(viewLabel,new LinearLayout.LayoutParams(-1,dp(20)));
-                    LinearLayout presets=new LinearLayout(this);
-                    presets.addView(button("Left",()->{viewport.selectRegion(GameViewport.LEFT);updateZoom();}),
-                        new LinearLayout.LayoutParams(0,dp(36),1));
-                    presets.addView(button("Center",()->{viewport.selectRegion(GameViewport.CENTER);updateZoom();}),
-                        new LinearLayout.LayoutParams(0,dp(36),1));
-                    presets.addView(button("Right",()->{viewport.selectRegion(GameViewport.RIGHT);updateZoom();}),
-                        new LinearLayout.LayoutParams(0,dp(36),1));
-                    panel.addView(presets);
-                    zoomLabel=label("Zoom 100%",12,true);
-                    panel.addView(zoomLabel,new LinearLayout.LayoutParams(-1,dp(25)));
-                    LinearLayout zr=new LinearLayout(this);
-                    zr.addView(button("−",()->viewport.adjustZoom(-0.1f)),new LinearLayout.LayoutParams(dp(42),dp(38)));
-                    slider=new SeekBar(this);slider.setMax(270);
-                    slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-                        public void onProgressChanged(SeekBar b,int progress,boolean user){
-                            if(user&&!changingSlider)viewport.setZoom(.30f+progress/100f);
-                        }
-                        public void onStartTrackingTouch(SeekBar b){}
-                        public void onStopTrackingTouch(SeekBar b){}
-                    });
-                    zr.addView(slider,new LinearLayout.LayoutParams(0,dp(38),1));
-                    zr.addView(button("+",()->viewport.adjustZoom(0.1f)),new LinearLayout.LayoutParams(dp(42),dp(38)));
-                    panel.addView(zr);
-                    LinearLayout pr=new LinearLayout(this);
-                    pr.addView(button("←",()->viewport.pan(-45,0)),new LinearLayout.LayoutParams(0,dp(35),1));
-                    pr.addView(button("Recenter",viewport::center),new LinearLayout.LayoutParams(0,dp(35),2));
-                    pr.addView(button("→",()->viewport.pan(45,0)),new LinearLayout.LayoutParams(0,dp(35),1));
-                    panel.addView(pr);
-                    }
                     LinearLayout nav=new LinearLayout(this);
-                    nav.addView(button("Overview",()->{viewport.showOverview();updateZoom();}),new LinearLayout.LayoutParams(0,dp(35),1));
-                    nav.addView(button("Rotate",this::toggleOrientation),new LinearLayout.LayoutParams(0,dp(35),1));
-                    nav.addView(button("Fullscreen",()->setFullscreen(!fullscreen)),new LinearLayout.LayoutParams(0,dp(35),1));
+                    nav.addView(button("Rotate",this::toggleOrientation),
+                        new LinearLayout.LayoutParams(0,dp(36),1));
+                    nav.addView(button("Fullscreen",()->setFullscreen(!fullscreen)),
+                        new LinearLayout.LayoutParams(0,dp(36),1));
                     panel.addView(nav);
                 }
             }
@@ -182,23 +171,28 @@ public class MainActivity extends Activity {
         }
         setContentView(root);updateZoom();updateTimer();
     }
-    private void updateZoom(){
+    private void selectView(int index){
+        if(viewport==null||landscape||original)return;
+        if(index==3)viewport.showOverview();
+        else viewport.selectRegion(index);
+        updateViewButtons();
+    }
+    private void updateViewButtons(){
         if(viewport==null)return;
-        float zoom=viewport.getZoom();
-        if(zoomLabel!=null)zoomLabel.setText(String.format(Locale.US,"Zoom %.0f%%",zoom*100));
-        if(zoomToggle!=null)zoomToggle.setText(String.format(Locale.US,"Zoom %s  %.0f%%",
-            zoomExpanded?"▴":"▾",zoom*100));
-        if(viewLabel!=null){
-            String region=viewport.getFocusRegion()==GameViewport.LEFT?"Left":viewport.getFocusRegion()==GameViewport.RIGHT?"Right":"Center";
-            viewLabel.setText(viewport.isHeightFit()?"Height-fit • "+region+" third":"Overview • entire game");
-        }
-        if(slider!=null){
-            changingSlider=true;slider.setProgress(Math.round((zoom-.30f)*100));changingSlider=false;
+        int selected=viewport.isHeightFit()?viewport.getFocusRegion():3;
+        for(int i=0;i<viewButtons.length;i++){
+            TextView b=viewButtons[i];
+            if(b!=null)b.setBackgroundColor(i==selected?0xFF246482:0xFF243650);
         }
     }
+    private void updateZoom(){updateViewButtons();}
     private void updateTimer(){
         java.util.ArrayList<ReminderScheduler.Reminder> reminders=ReminderScheduler.list(this);
         if(timerButton!=null)timerButton.setText("Timers ("+reminders.size()+")");
+        if(bellButton!=null){
+            bellButton.setText(reminders.isEmpty()?"🔔":"🔔"+reminders.size());
+            bellButton.setContentDescription("Timers and notifications, "+reminders.size()+" active");
+        }
         if(countdown==null)return;
         if(reminders.isEmpty()){countdown.setText("No active reminders");return;}
         long remaining=Math.max(0,reminders.get(0).due-System.currentTimeMillis())/1000;
