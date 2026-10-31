@@ -18,7 +18,7 @@ public class MainActivity extends Activity {
     private GameViewport viewport;
     private FrameLayout root;
     private LinearLayout panel;
-    private TextView countdown, zoomLabel;
+    private TextView countdown, zoomLabel, viewLabel;
     private SeekBar slider;
     private boolean expanded,original,fullscreen,landscape;
     private boolean changingSlider=false;
@@ -76,11 +76,11 @@ public class MainActivity extends Activity {
     }
     private void build(){
         landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
-        slider=null;zoomLabel=null;countdown=null;
+        slider=null;zoomLabel=null;viewLabel=null;countdown=null;
         if(viewport.getParent()!=null)((android.view.ViewGroup)viewport.getParent()).removeView(viewport);
         root=new FrameLayout(this);root.setBackgroundColor(Color.BLACK);
         root.addView(viewport,new FrameLayout.LayoutParams(-1,-1));
-        viewport.setModes(landscape,original,(!landscape&&!original)?(expanded?292:52):0);
+        viewport.setModes(landscape,original,(!landscape&&!original)?(expanded?318:52):0);
         if(!original){
             panel=new LinearLayout(this);
             panel.setOrientation(LinearLayout.VERTICAL);
@@ -88,7 +88,7 @@ public class MainActivity extends Activity {
             panel.setBackgroundColor(0xEF07182C);
             FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(
                 landscape?dp(expanded?265:72):-1,
-                dp(expanded?(landscape?280:288):landscape?48:44),
+                dp(expanded?(landscape?280:318):landscape?48:44),
                 landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM);
             p.setMargins(dp(8),0,dp(8),dp(8));
             root.addView(panel,p);
@@ -115,6 +115,16 @@ public class MainActivity extends Activity {
                     panel.addView(orientation);
                 }
                 if(!landscape){
+                    viewLabel=label("View",12,true);
+                    panel.addView(viewLabel,new LinearLayout.LayoutParams(-1,dp(20)));
+                    LinearLayout presets=new LinearLayout(this);
+                    presets.addView(button("Left",()->{viewport.selectRegion(GameViewport.LEFT);updateZoom();}),
+                        new LinearLayout.LayoutParams(0,dp(36),1));
+                    presets.addView(button("Center",()->{viewport.selectRegion(GameViewport.CENTER);updateZoom();}),
+                        new LinearLayout.LayoutParams(0,dp(36),1));
+                    presets.addView(button("Right",()->{viewport.selectRegion(GameViewport.RIGHT);updateZoom();}),
+                        new LinearLayout.LayoutParams(0,dp(36),1));
+                    panel.addView(presets);
                     zoomLabel=label("Zoom 100%",12,true);
                     panel.addView(zoomLabel,new LinearLayout.LayoutParams(-1,dp(25)));
                     LinearLayout zr=new LinearLayout(this);
@@ -132,11 +142,11 @@ public class MainActivity extends Activity {
                     panel.addView(zr);
                     LinearLayout pr=new LinearLayout(this);
                     pr.addView(button("←",()->viewport.pan(-45,0)),new LinearLayout.LayoutParams(0,dp(35),1));
-                    pr.addView(button("Center",viewport::center),new LinearLayout.LayoutParams(0,dp(35),2));
+                    pr.addView(button("Recenter",viewport::center),new LinearLayout.LayoutParams(0,dp(35),2));
                     pr.addView(button("→",()->viewport.pan(45,0)),new LinearLayout.LayoutParams(0,dp(35),1));
                     panel.addView(pr);
                     LinearLayout nav=new LinearLayout(this);
-                    nav.addView(button("Fit",viewport::resetFit),new LinearLayout.LayoutParams(0,dp(35),1));
+                    nav.addView(button("Overview",()->{viewport.showOverview();updateZoom();}),new LinearLayout.LayoutParams(0,dp(35),1));
                     nav.addView(button("Rotate",this::toggleOrientation),new LinearLayout.LayoutParams(0,dp(35),1));
                     nav.addView(button("Fullscreen",()->setFullscreen(!fullscreen)),new LinearLayout.LayoutParams(0,dp(35),1));
                     panel.addView(nav);
@@ -159,6 +169,10 @@ public class MainActivity extends Activity {
         if(viewport==null)return;
         float zoom=viewport.getZoom();
         if(zoomLabel!=null)zoomLabel.setText(String.format(Locale.US,"Zoom %.0f%%",zoom*100));
+        if(viewLabel!=null){
+            String region=viewport.getFocusRegion()==GameViewport.LEFT?"Left":viewport.getFocusRegion()==GameViewport.RIGHT?"Right":"Center";
+            viewLabel.setText(viewport.isHeightFit()?"Height-fit • "+region+" third":"Overview • entire game");
+        }
         if(slider!=null){
             changingSlider=true;slider.setProgress(Math.round((zoom-.30f)*100));changingSlider=false;
         }
