@@ -1,158 +1,155 @@
 package com.seaf.companion;
 
-import android.app.Activity;
-import android.app.AlarmManager;
-import android.app.PendingIntent;
-import android.content.Context;
-import android.content.Intent;
+import android.app.*;
+import android.content.*;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.net.Uri;
-import android.os.Build;
-import android.os.Bundle;
-import android.webkit.CookieManager;
-import android.webkit.WebChromeClient;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
-import android.view.Gravity;
-import android.view.View;
+import android.os.*;
+import android.provider.Settings;
+import android.view.*;
+import android.webkit.*;
 import android.widget.*;
-import java.text.DateFormat;
-import java.util.Date;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private static final String GAME_URL = "https://seaf.se/";
     private WebView web;
-    private LinearLayout root, panel;
+    private FrameLayout base;
+    private LinearLayout pane;
+    private TextView countdown;
     private SessionRecorder recorder;
-    private TextView timerStatus;
-    private EditText minutes;
-    private boolean panelVisible = true;
-    private int orientationMode;
-
-    @Override public void onCreate(Bundle state) {
-        super.onCreate(state);
+    private final Handler tick = new Handler(Looper.getMainLooper());
+    private boolean expanded;
+    private boolean landscape;
+    private final Runnable clock = new Runnable(){
+        public void run(){updateTimer();tick.postDelayed(this,1000);}
+    };
+    @Override public void onCreate(Bundle b){
+        super.onCreate(b);
         getWindow().setStatusBarColor(0xFF07182C);
         getWindow().setNavigationBarColor(0xFF07182C);
-        getWindow().getDecorView().setSystemUiVisibility(0);
-        web = new WebView(this);
+        web=new WebView(this);
         WebSettings s=web.getSettings();
         s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);
-        s.setLoadsImagesAutomatically(true);s.setUseWideViewPort(true);
-        s.setLoadWithOverviewMode(true);s.setSupportZoom(true);
-        s.setBuiltInZoomControls(true);s.setDisplayZoomControls(false);
-        s.setMediaPlaybackRequiresUserGesture(false);
+        s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);
+        s.setSupportZoom(true);s.setBuiltInZoomControls(true);
+        s.setDisplayZoomControls(false);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web,true);
         web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new WebViewClient(){
-            @Override public boolean shouldOverrideUrlLoading(WebView w,WebResourceRequest req){
-                Uri u=req.getUrl();String scheme=u.getScheme();
+            @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){
+                String scheme=r.getUrl().getScheme();
                 if("https".equals(scheme)||"http".equals(scheme))return false;
-                try{startActivity(new Intent(Intent.ACTION_VIEW,u));}catch(Exception ignored){}
+                try{startActivity(new Intent(Intent.ACTION_VIEW,r.getUrl()));}catch(Exception ignored){}
                 return true;
             }
         });
         recorder=new SessionRecorder(this,web);
-        panelVisible=getPreferences(0).getBoolean("showPanel",true);
-        orientationMode=getPreferences(0).getInt("orientation",0);
-        setRequestedOrientation(orientationMode==1?ActivityInfo.SCREEN_ORIENTATION_PORTRAIT:
-            orientationMode==2?ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE:ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
-        renderLayout();
-        web.loadUrl(GAME_URL);
+        expanded=getPreferences(0).getBoolean("expanded",true);
+        build();
+        tick.post(clock);
+        web.loadUrl("https://seaf.se/");
     }
-    private int dp(int v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}
-    private TextView label(String value,int size){
-        TextView t=new TextView(this);t.setText(value);t.setTextSize(size);
-        t.setTextColor(Color.WHITE);t.setPadding(dp(8),dp(4),dp(8),dp(4));return t;
+    private int dp(int n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}
+    private TextView text(String value,int size,boolean bold){
+        TextView t=new TextView(this);t.setText(value);t.setTextColor(Color.WHITE);
+        t.setTextSize(size);if(bold)t.setTypeface(null,1);t.setGravity(Gravity.CENTER_VERTICAL);
+        return t;
     }
-    private Button action(String text,Runnable callback){
-        Button b=new Button(this);b.setText(text);b.setAllCaps(false);
-        b.setTextSize(12);b.setMinHeight(0);b.setMinimumHeight(0);
-        b.setPadding(dp(6),0,dp(6),0);
-        b.setOnClickListener(v->callback.run());return b;
+    private TextView control(String title,Runnable task){
+        TextView t=text(title,13,true);t.setGravity(Gravity.CENTER);
+        t.setBackgroundColor(0xFF243650);t.setPadding(dp(10),0,dp(10),0);
+        t.setOnClickListener(v->task.run());return t;
     }
-    private void renderLayout(){
+    private void build(){
+        landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
         if(web.getParent()!=null)((android.view.ViewGroup)web.getParent()).removeView(web);
-        root=new LinearLayout(this);
-        boolean landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
-        root.setOrientation(landscape?LinearLayout.HORIZONTAL:LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.BLACK);
-        root.addView(web,new LinearLayout.LayoutParams(landscape?0:-1,landscape?-1:0,1f));
-        panel=new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setBackgroundColor(0xFF07182C);
-        panel.setPadding(dp(6),dp(6),dp(6),dp(4));
-        if(landscape)root.addView(panel,new LinearLayout.LayoutParams(dp(235),-1));
-        else root.addView(panel,new LinearLayout.LayoutParams(-1,dp(192)));
-        if(panelVisible) buildPanel(landscape);
-        else panel.addView(action("Show Companion",()->{panelVisible=true;getPreferences(0).edit().putBoolean("showPanel",true).apply();renderLayout();}));
-        if(!panelVisible){
-            LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)panel.getLayoutParams();
-            if(landscape)p.width=dp(110);else p.height=dp(48);
-            panel.setLayoutParams(p);
+        base=new FrameLayout(this);base.setBackgroundColor(Color.BLACK);
+        base.addView(web,new FrameLayout.LayoutParams(-1,-1));
+        pane=new LinearLayout(this);pane.setOrientation(LinearLayout.VERTICAL);
+        pane.setPadding(dp(10),dp(8),dp(10),dp(8));pane.setBackgroundColor(0xF007182C);
+        FrameLayout.LayoutParams pos=new FrameLayout.LayoutParams(
+          landscape?dp(expanded?260:76):-1,dp(expanded?(landscape?220:208):44),
+          landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM);
+        pos.setMargins(landscape?0:dp(8),0,landscape?dp(8):dp(8),landscape?0:dp(8));
+        base.addView(pane,pos);
+        LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView name=text(expanded?"SEAF COMPANION":"SEAF",landscape?13:15,true);
+        head.addView(name,new LinearLayout.LayoutParams(0,dp(30),1));
+        TextView toggle=control(expanded?"−":"＋",()->{
+            expanded=!expanded;getPreferences(0).edit().putBoolean("expanded",expanded).apply();build();
+        });
+        head.addView(toggle,new LinearLayout.LayoutParams(dp(44),dp(32)));
+        pane.addView(head);
+        if(expanded){
+            countdown=text("No reminder set",landscape?19:22,true);
+            pane.addView(countdown,new LinearLayout.LayoutParams(-1,dp(38)));
+            pane.addView(text("Local reminder · SEAF sync not connected",11,false));
+            LinearLayout actions=new LinearLayout(this);actions.setPadding(0,dp(8),0,0);
+            TextView timers=control("Timer",this::showTimer);
+            TextView capture=control(recorder.isRecording()?"Stop + ZIP":"Capture",()->{
+                if(recorder.isRecording())recorder.stop();else recorder.start();build();
+            });
+            TextView settings=control("Settings",this::showSettings);
+            for(TextView v:new TextView[]{timers,capture,settings}){
+                LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(40),1);
+                p.setMargins(dp(2),0,dp(2),0);actions.addView(v,p);
+            }
+            pane.addView(actions);
         }
-        setContentView(root);
+        setContentView(base);updateTimer();
     }
-    private void buildPanel(boolean landscape){
-        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView brand=label("SEAF COMPANION",14);brand.setTypeface(null,1);
-        header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
-        header.addView(action("Hide",()->{panelVisible=false;getPreferences(0).edit().putBoolean("showPanel",false).apply();renderLayout();}),
-            new LinearLayout.LayoutParams(dp(68),dp(38)));
-        panel.addView(header);
-        panel.addView(label("Game status: Live sync not connected",11));
-        timerStatus=label("",12);panel.addView(timerStatus);refreshTimer();
-        LinearLayout controls=new LinearLayout(this);
-        controls.addView(action("Refresh",()->web.reload()),new LinearLayout.LayoutParams(0,dp(40),1));
-        controls.addView(action(recorder.isRecording()?"Stop + ZIP":"Capture",()->{
-            if(recorder.isRecording())recorder.stop();else recorder.start();
-            renderLayout();
-        }),new LinearLayout.LayoutParams(0,dp(40),1));
-        controls.addView(action("Rotate",()->{
-            int mode=getResources().getConfiguration().orientation==Configuration.ORIENTATION_PORTRAIT?2:1;
-            getPreferences(0).edit().putInt("orientation",mode).apply();
-            setRequestedOrientation(mode==1?ActivityInfo.SCREEN_ORIENTATION_PORTRAIT:ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-        }),new LinearLayout.LayoutParams(0,dp(40),1));
-        panel.addView(controls);
-        LinearLayout timerRow=new LinearLayout(this);timerRow.setGravity(Gravity.CENTER_VERTICAL);
-        minutes=new EditText(this);minutes.setSingleLine(true);minutes.setInputType(2);
-        minutes.setTextColor(Color.WHITE);minutes.setHintTextColor(0xFFB0B9C4);
-        minutes.setHint("Minutes");minutes.setTextSize(14);
-        timerRow.addView(minutes,new LinearLayout.LayoutParams(0,dp(42),1));
-        timerRow.addView(action("Set reminder",this::setTimer),new LinearLayout.LayoutParams(dp(128),dp(42)));
-        panel.addView(timerRow);
-        if(landscape){
-            panel.addView(label("Reminders are manual; original game remains fully available.",11));
-        }
+    private void updateTimer(){
+        if(countdown==null)return;
+        if(!expanded)return;
+        long due=getPreferences(0).getLong("timerDue",0);
+        long delta=Math.max(0,due-System.currentTimeMillis());
+        if(due==0){countdown.setText("No reminder set");return;}
+        if(delta==0){countdown.setText("Reminder ready");return;}
+        long sec=delta/1000;
+        countdown.setText(String.format(Locale.US,"%02d:%02d:%02d",sec/3600,(sec/60)%60,sec%60));
     }
-    private void refreshTimer(){
-        long at=getPreferences(0).getLong("timerDue",0);
-        timerStatus.setText(at==0?"No timer set":("Reminder: "+DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(new Date(at))));
+    private void showTimer(){
+        LinearLayout form=new LinearLayout(this);form.setPadding(dp(22),dp(8),dp(22),0);
+        form.setOrientation(LinearLayout.VERTICAL);
+        EditText minutes=new EditText(this);minutes.setInputType(2);minutes.setHint("Minutes until reminder");
+        form.addView(minutes);
+        new AlertDialog.Builder(this).setTitle("Manual mission reminder")
+          .setMessage("This timer is local and is not synchronized with SEAF.")
+          .setView(form).setPositiveButton("Set", (d,w)->{
+              int n=0;try{n=Integer.parseInt(minutes.getText().toString());}catch(Exception ignored){}
+              if(n<1||n>10080){Toast.makeText(this,"Enter 1–10080 minutes",Toast.LENGTH_LONG).show();return;}
+              if(Build.VERSION.SDK_INT>=33&&checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED)
+                  requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},7);
+              long due=System.currentTimeMillis()+n*60000L;
+              ReminderScheduler.schedule(this,due);
+              updateTimer();
+          }).setNeutralButton("Cancel existing",(d,w)->{
+              ReminderScheduler.cancel(this);updateTimer();
+          }).setNegativeButton("Close",null).show();
     }
-    private void setTimer(){
-        int amount;
-        try{amount=Integer.parseInt(minutes.getText().toString());}catch(Exception e){amount=0;}
-        if(amount<1||amount>10080){Toast.makeText(this,"Enter 1–10080 minutes",Toast.LENGTH_SHORT).show();return;}
-        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED)
-            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},5);
-        long at=System.currentTimeMillis()+amount*60000L;
-        Intent intent=new Intent(this,TimerReceiver.class).putExtra("label","SEAF timer");
-        PendingIntent pi=PendingIntent.getBroadcast(this,1001,intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        ((AlarmManager)getSystemService(Context.ALARM_SERVICE)).setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,at,pi);
-        getPreferences(0).edit().putLong("timerDue",at).apply();refreshTimer();
-        Toast.makeText(this,"Local reminder scheduled",Toast.LENGTH_SHORT).show();
+    private void showSettings(){
+        String[] options={"Notification settings","Battery/background settings","Mobile data settings","Refresh original game","Start/stop screen capture"};
+        new AlertDialog.Builder(this).setTitle("Companion settings").setItems(options,(d,which)->{
+            if(which==0)openSettings(Settings.ACTION_APP_NOTIFICATION_SETTINGS,"android.provider.extra.APP_PACKAGE");
+            if(which==1)openSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,null);
+            if(which==2)openSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,null);
+            if(which==3)web.reload();
+            if(which==4){if(recorder.isRecording())recorder.stop();else recorder.start();build();}
+        }).setNegativeButton("Close",null).show();
     }
-    @Override public void onConfigurationChanged(Configuration config){
-        super.onConfigurationChanged(config);renderLayout();
+    private void openSettings(String action,String extra){
+        try{
+            Intent i=new Intent(action);
+            if(extra==null)i.setData(Uri.parse("package:"+getPackageName()));
+            else i.putExtra(extra,getPackageName());
+            startActivity(i);
+        }catch(Exception e){Toast.makeText(this,"Open Android App Info manually",Toast.LENGTH_LONG).show();}
     }
-    @Override public void onBackPressed(){
-        if(!panelVisible){panelVisible=true;getPreferences(0).edit().putBoolean("showPanel",true).apply();renderLayout();}
-        else if(web.canGoBack())web.goBack();else super.onBackPressed();
-    }
+    @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);build();}
+    @Override public void onBackPressed(){if(web.canGoBack())web.goBack();else super.onBackPressed();}
     @Override protected void onPause(){CookieManager.getInstance().flush();super.onPause();}
-    @Override protected void onDestroy(){recorder.close();if(web.getParent()!=null)((android.view.ViewGroup)web.getParent()).removeView(web);web.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){tick.removeCallbacks(clock);recorder.close();web.destroy();super.onDestroy();}
 }
