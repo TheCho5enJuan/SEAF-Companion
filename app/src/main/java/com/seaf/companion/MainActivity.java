@@ -18,6 +18,11 @@ public class MainActivity extends Activity {
     private GameViewport viewport;
     private FrameLayout root;
     private LinearLayout panel;
+    private ImageView ambientView;
+    private boolean ambientEnabled;
+    private final Runnable ambientTick=new Runnable(){public void run(){
+        updateAmbient();if(ambientEnabled)handler.postDelayed(this,12000);
+    }};
     private TextView countdown, timerButton, bellBadge;
     private final CompanionChrome.Icon[] viewButtons=new CompanionChrome.Icon[4];
     private boolean adjustingPanel=false;
@@ -31,6 +36,7 @@ public class MainActivity extends Activity {
         expanded=getPreferences(0).getBoolean("expanded",false);
         original=getPreferences(0).getBoolean("originalMode",false);
         fullscreen=getPreferences(0).getBoolean("fullscreenMode",false);
+        ambientEnabled=getPreferences(0).getBoolean("ambientBlurEnabled",false);
         web=new WebView(this);
         WebSettings s=web.getSettings();
         s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);
@@ -47,6 +53,7 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView v,String url){
                 if(viewport!=null)viewport.onPageFinished();
+                if(ambientEnabled)handler.postDelayed(()->applyAmbient(),600);
             }
             @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){
                 Uri u=r.getUrl();String scheme=u.getScheme();
@@ -64,6 +71,7 @@ public class MainActivity extends Activity {
         build();
         setFullscreen(fullscreen);
         handler.post(clock);
+        if(ambientEnabled)handler.postDelayed(ambientTick,3500);
         web.loadUrl("https://seaf.se/");
     }
     private TextView label(String text,int size,boolean bold){
@@ -164,6 +172,14 @@ public class MainActivity extends Activity {
         if(viewport.getParent()!=null)((android.view.ViewGroup)viewport.getParent()).removeView(viewport);
         root=new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
+        ambientView=new ImageView(this);
+        ambientView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        ambientView.setVisibility(ambientEnabled?View.VISIBLE:View.GONE);
+        root.addView(ambientView,new FrameLayout.LayoutParams(-1,-1));
+        if(android.os.Build.VERSION.SDK_INT>=31){
+            ambientView.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(
+                36f,36f,android.graphics.Shader.TileMode.CLAMP));
+        }
         root.addView(viewport,new FrameLayout.LayoutParams(-1,-1));
         viewport.setModes(landscape,original,(!landscape&&!original)?(expanded?162:66):0);
         if(!original){
@@ -261,6 +277,7 @@ public class MainActivity extends Activity {
             p.setMargins(0,0,dp(12),dp(20));root.addView(restore,p);
         }
         setContentView(root);
+        if(ambientEnabled)handler.postDelayed(ambientTick,900);
         if(!original)root.post(this::updatePanelPosition);
         updateViewButtons();updateTimer();
     }
@@ -510,11 +527,39 @@ public class MainActivity extends Activity {
         dialog.show();
         if(active!=null)handler.postDelayed(redrawTime[0],1000);
     }
+    private void applyAmbient(){
+        handler.removeCallbacks(ambientTick);
+        if(ambientView!=null)ambientView.setVisibility(ambientEnabled?View.VISIBLE:View.GONE);
+        // Only make the page's background transparent; do not change the game stage.
+        // This allows the blurred snapshot beneath the WebView to fill letterboxing.
+        web.setBackgroundColor(ambientEnabled?Color.TRANSPARENT:Color.BLACK);
+        web.evaluateJavascript(ambientEnabled?
+            "(function(){var s=document.getElementById('seaf-ambient-transparent');"+
+            "if(!s){s=document.createElement('style');s.id='seaf-ambient-transparent';"+
+            "s.textContent='html,body,#page-home{background-color:transparent!important}';"+
+            "document.head.appendChild(s);}})();":
+            "(function(){var s=document.getElementById('seaf-ambient-transparent');"+
+            "if(s)s.remove();})()",null);
+        if(ambientEnabled)handler.postDelayed(ambientTick,1500);
+    }
+    private void updateAmbient(){
+        if(!ambientEnabled||web==null||ambientView==null||web.getWidth()<1)return;
+        try{
+            int w=280,h=Math.max(140,Math.round((float)web.getHeight()/web.getWidth()*w));
+            android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(
+                w,h,android.graphics.Bitmap.Config.RGB_565);
+            android.graphics.Canvas capture=new android.graphics.Canvas(bitmap);
+            capture.scale((float)w/web.getWidth(),(float)h/web.getHeight());
+            web.draw(capture);
+            ambientView.setImageBitmap(bitmap);
+        }catch(Exception ignored){}
+    }
     private void showSettings(){
         String[] opts={"Original game mode","Auto rotate","Lock portrait","Lock landscape",
             "Toggle fullscreen","Remember zoom: "+(getPreferences(0).getBoolean("rememberZoom",true)?"On":"Off"),
             "Auto center: "+(getPreferences(0).getBoolean("autoCenter",true)?"On":"Off"),
-            "Mission notification sound","Android battery settings","Refresh game","Open game in browser"};
+            "Mission notification sound","Android battery settings","Refresh game","Open game in browser",
+            "Ambient blurred background: "+(ambientEnabled?"On":"Off")};
         new AlertDialog.Builder(this).setTitle("SEAF Companion Settings")
           .setItems(opts,(d,which)->{
               switch(which){
@@ -533,6 +578,9 @@ public class MainActivity extends Activity {
                 case 8:openAppSettings();break;
                 case 9:web.reload();break;
                 case 10:startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(web.getUrl()==null?"https://seaf.se/":web.getUrl())));break;
+                case 11:ambientEnabled=!ambientEnabled;
+                    getPreferences(0).edit().putBoolean("ambientBlurEnabled",ambientEnabled).apply();
+                    applyAmbient();break;
               }
           }).setNegativeButton("Close",null).show();
     }
@@ -567,5 +615,5 @@ public class MainActivity extends Activity {
     @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);build();}
     @Override public void onBackPressed(){if(web.canGoBack())web.goBack();else if(original)setOriginal(false);else super.onBackPressed();}
     @Override protected void onPause(){CookieManager.getInstance().flush();super.onPause();}
-    @Override protected void onDestroy(){handler.removeCallbacks(clock);web.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){handler.removeCallbacks(clock);handler.removeCallbacks(ambientTick);web.destroy();super.onDestroy();}
 }
