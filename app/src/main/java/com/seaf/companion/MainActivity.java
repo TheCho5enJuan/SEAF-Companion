@@ -81,15 +81,20 @@ public class MainActivity extends Activity {
         boolean landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
         root.setOrientation(landscape?LinearLayout.HORIZONTAL:LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.BLACK);
-        root.addView(web,new LinearLayout.LayoutParams(0==1?0:(landscape?0:-1),landscape?-1:0,1f));
+        root.addView(web,new LinearLayout.LayoutParams(landscape?0:-1,landscape?-1:0,1f));
         panel=new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(0xFF07182C);
         panel.setPadding(dp(6),dp(6),dp(6),dp(4));
         if(landscape)root.addView(panel,new LinearLayout.LayoutParams(dp(235),-1));
         else root.addView(panel,new LinearLayout.LayoutParams(-1,dp(192)));
-        buildPanel(landscape);
-        panel.setVisibility(panelVisible?View.VISIBLE:View.GONE);
+        if(panelVisible) buildPanel(landscape);
+        else panel.addView(action("Show Companion",()->{panelVisible=true;getPreferences(0).edit().putBoolean("showPanel",true).apply();renderLayout();}));
+        if(!panelVisible){
+            LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)panel.getLayoutParams();
+            if(landscape)p.width=dp(110);else p.height=dp(48);
+            panel.setLayoutParams(p);
+        }
         setContentView(root);
     }
     private void buildPanel(boolean landscape){
