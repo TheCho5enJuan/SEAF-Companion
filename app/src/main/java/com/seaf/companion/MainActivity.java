@@ -1,6 +1,12 @@
 package com.seaf.companion;
 
 import android.app.Activity;
+import android.content.ContentValues;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.os.Environment;
+import android.provider.MediaStore;
+import java.io.OutputStream;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
@@ -95,12 +101,120 @@ public class MainActivity extends Activity {
         });
         popup.getMenu().add("Zoom in").setOnMenuItemClickListener(i -> { webView.zoomIn(); return true; });
         popup.getMenu().add("Zoom out").setOnMenuItemClickListener(i -> { webView.zoomOut(); return true; });
+        popup.getMenu().add("Capture layout + screenshot").setOnMenuItemClickListener(i -> {
+            captureDiagnostics(); return true;
+        });
         popup.getMenu().add("Refresh").setOnMenuItemClickListener(i -> { webView.reload(); return true; });
         popup.getMenu().add("Browser login (fallback)").setOnMenuItemClickListener(i -> {
             openBrowser(Uri.parse(webView.getUrl() == null ? GAME_URL : webView.getUrl())); return true;
         });
         popup.show();
     }
+
+    // One tap exports a screenshot plus a structural layout/CSS inventory.
+    // No network requests, cookies, local storage, input values, or auth tokens are collected.
+    private static final String INSPECT_JS = """
+        (function () {
+          const safe = s => String(s || '').slice(0, 160);
+          const els = Array.from(document.querySelectorAll('*')).slice(0, 1800);
+          const rows = els.map((el, idx) => {
+            const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+            const parts = [];
+            let n = el;
+            for (let j = 0; j < 4 && n && n.nodeType === 1; j++, n = n.parentElement) {
+              let part = n.tagName.toLowerCase();
+              if (n.id) part += '#' + CSS.escape(n.id).slice(0, 80);
+              else if (n.classList.length) part += '.' + Array.from(n.classList).slice(0, 3).map(x => CSS.escape(x)).join('.');
+              parts.unshift(part);
+            }
+            return {
+              i: idx, selector: safe(parts.join(' > ')),
+              tag: el.tagName.toLowerCase(),
+              rect: {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)},
+              style: {
+                display: s.display, position: s.position, overflow: s.overflow,
+                width: s.width, height: s.height, minWidth: s.minWidth,
+                maxWidth: s.maxWidth, fontSize: s.fontSize,
+                transform: s.transform, flexDirection: s.flexDirection,
+                gridTemplateColumns: s.gridTemplateColumns,
+                zIndex: s.zIndex, visibility: s.visibility
+              }
+            };
+          });
+          const v = window.visualViewport;
+          return JSON.stringify({
+            capturedAt: new Date().toISOString(),
+            origin: location.origin,
+            pathname: location.pathname,
+            viewport: {
+              innerWidth: innerWidth, innerHeight: innerHeight,
+              devicePixelRatio: devicePixelRatio,
+              screenWidth: screen.width, screenHeight: screen.height,
+              visualWidth: v ? v.width : null, visualHeight: v ? v.height : null,
+              visualScale: v ? v.scale : null,
+              orientation: screen.orientation ? screen.orientation.type : null
+            },
+            document: {
+              scrollWidth: document.documentElement.scrollWidth,
+              scrollHeight: document.documentElement.scrollHeight,
+              bodyWidth: document.body ? document.body.scrollWidth : null,
+              bodyHeight: document.body ? document.body.scrollHeight : null
+            },
+            nodesScanned: els.length, elements: rows
+          });
+        })();
+        """;
+
+    private void captureDiagnostics() {
+        if (!"seaf.se".equalsIgnoreCase(Uri.parse(webView.getUrl() == null ? GAME_URL : webView.getUrl()).getHost())) {
+            Toast.makeText(this, "Capture only supported on seaf.se", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+                .format(new java.util.Date());
+        int width = webView.getWidth(), height = webView.getHeight();
+        if (width > 0 && height > 0) {
+            try {
+                Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                webView.draw(new Canvas(bitmap));
+                Uri image = createExport(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        "seaf-" + stamp + ".png", "image/png");
+                try (OutputStream out = getContentResolver().openOutputStream(image)) {
+                    if (out == null || !bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
+                        throw new Exception("PNG export failed");
+                }
+                bitmap.recycle();
+            } catch (Exception e) {
+                Toast.makeText(this, "Screenshot failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        }
+        webView.evaluateJavascript(INSPECT_JS, encoded -> {
+            try {
+                String json = (String) new org.json.JSONTokener(encoded).nextValue();
+                Uri output = createExport(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        "seaf-" + stamp + ".json", "application/json");
+                try (OutputStream out = getContentResolver().openOutputStream(output)) {
+                    if (out == null) throw new Exception("JSON export failed");
+                    out.write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                Toast.makeText(this, "Saved seaf-" + stamp + " files in Downloads/SEAFCompanion",
+                        Toast.LENGTH_LONG).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Layout export failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private Uri createExport(Uri collection, String name, String mime) {
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+        values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+        values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SEAFCompanion");
+        Uri uri = getContentResolver().insert(collection, values);
+        if (uri == null) throw new IllegalStateException("Could not create export");
+        return uri;
+    }
+
     private void setOrientation(int mode) {
         getPreferences(0).edit().putInt("orientation", mode).apply();
         setRequestedOrientation(mode == 1 ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT :
