@@ -189,7 +189,7 @@ public class MainActivity extends Activity {
             panel.setBackground(CompanionChrome.panel(getResources().getDisplayMetrics().density));
             panel.setElevation(dp(10));
             FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(
-                landscape?dp(expanded?255:178):Math.min(dp(375),getResources().getDisplayMetrics().widthPixels-dp(20)),
+                landscape?dp(expanded?255:76):Math.min(dp(375),getResources().getDisplayMetrics().widthPixels-dp(20)),
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);
             params.setMargins(dp(9),0,dp(9),dp(10));
@@ -230,9 +230,6 @@ public class MainActivity extends Activity {
                     });
                 makeDraggable(exp);addIcon(bar,exp,1);
             }else{
-                CompanionChrome.Icon rotate=iconButton("orientation","Return to portrait",
-                    ()->applyOrientation(1));
-                makeDraggable(rotate);addIcon(bar,rotate,1);
                 CompanionChrome.Icon expand=iconButton(expanded?"collapse":"expand",
                     expanded?"Collapse":"Expand",()->{
                         expanded=!expanded;getPreferences(0).edit()
