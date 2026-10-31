@@ -1,189 +1,260 @@
 package com.seaf.companion;
 
 import android.app.Activity;
-import android.content.Context;
 import android.content.SharedPreferences;
-import android.content.res.Configuration;
+import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.GestureDetector;
-import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
-import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
+import java.util.Locale;
 
 /**
- * Keeps SEAF's fixed widescreen page at a stable viewport size in portrait.
- * Magnification is applied to the complete interactive view, rather than to
- * WebView's internal text/page zoom. Original mode and landscape are unmodified.
+ * Portrait fitting is performed on SEAF's 1600x900 DOM stage, NOT on the
+ * Android WebView surface. Scaling a multi-thousand-pixel WebView caused
+ * GPU composition seams, missing tiles and blue/black rectangles.
+ *
+ * The WebView itself always occupies the actual phone viewport.
+ * Landscape and Original Game restore the site's original stage styles.
  */
 public final class GameViewport extends FrameLayout {
     public interface ZoomListener { void changed(float zoom); }
-    private static final int DESKTOP_WIDTH_DP = 1600;
-    private static final int DESKTOP_HEIGHT_DP = 900;
-    private static final float MIN_ZOOM = 0.30f, MAX_ZOOM = 3f;
+    private static final float MIN_ZOOM = 0.30f, MAX_ZOOM = 3.0f;
     private final WebView web;
     private final SharedPreferences preferences;
+    private final Handler handler = new Handler(Looper.getMainLooper());
     private final ScaleGestureDetector scaleDetector;
     private final GestureDetector doubleTap;
     private ZoomListener listener;
-    private boolean originalMode;
-    private boolean landscape;
-    private boolean rememberZoom;
-    private boolean autoCenter;
-    private float zoom = 1f;
-    private float offsetX = 0f, offsetY = 0f;
-    private int reservedBottom = 0;
-    private float fittedScale = 1f;
+    private boolean originalMode, landscape, rememberZoom, autoCenter;
+    private float zoom, offsetX, offsetY;
+    private int reservedBottomDp;
+    private int pageGeneration;
     private float lastFocusX, lastFocusY;
-    private boolean multiTouch = false;
+    private boolean multiTouch;
 
-    public GameViewport(Activity activity, WebView view) {
+    // The selector and 1600x900 dimensions come from the original SEAF
+    // portrait-fit implementation, not a guess about an arbitrary page.
+    // No game state, cookies, network calls or buttons are altered.
+    private static final String PAGE_LAYOUT_JS = """
+        (function(){
+          'use strict';
+          if (window.__seafCompanionLayout) return;
+          var state = {
+            enabled:false, zoom:1, dx:0, dy:0, bottom:0,
+            stage:null, saved:null, signature:'',
+            keys:['zoom','left','top','transform','transform-origin'],
+            find:function(){
+              return document.querySelector('#page-home > .scale-me.pos-abs-c') ||
+                     document.querySelector('#page-home .scale-me.pos-abs-c');
+            },
+            save:function(e){
+              var before={};
+              this.keys.forEach(function(k){
+                before[k]=[e.style.getPropertyValue(k),e.style.getPropertyPriority(k)];
+              });
+              return before;
+            },
+            restore:function(){
+              if(!this.stage || !this.saved) return;
+              var e=this.stage, old=this.saved;
+              this.keys.forEach(function(k){
+                if(old[k][0])e.style.setProperty(k,old[k][0],old[k][1]);
+                else e.style.removeProperty(k);
+              });
+              this.stage=null; this.saved=null; this.signature='';
+            },
+            apply:function(){
+              if(!this.enabled){
+                this.restore();
+                return;
+              }
+              var e=this.find();
+              if(!e){
+                this.restore();
+                return;
+              }
+              if(this.stage!==e){
+                this.restore();
+                this.stage=e;
+                this.saved=this.save(e);
+              }
+              var frame=document.getElementById('page-home')||e.parentElement;
+              var width=(frame&&frame.clientWidth)||window.innerWidth;
+              var height=(frame&&frame.clientHeight)||window.innerHeight;
+              var stageW=e.offsetWidth||1600, stageH=e.offsetHeight||900;
+              if(width<100||height<100||stageW<100||stageH<100)return;
+              var bottom=Math.max(0,Math.min(this.bottom,height*0.55));
+              var usableH=Math.max(150,height-bottom);
+              var fit=Math.min((width-4)/stageW,(usableH-4)/stageH);
+              var factor=Math.max(0.01,fit*this.zoom);
+              var extraX=Math.max(0,(stageW*factor-width)/2);
+              var extraY=Math.max(0,(stageH*factor-usableH)/2);
+              var x=width/2 + Math.max(-extraX,Math.min(extraX,this.dx));
+              var y=usableH/2 + Math.max(-extraY,Math.min(extraY,this.dy));
+              var key=[width,height,stageW,stageH,factor,x,y].join('|');
+              // Avoid repeatedly invalidating the game renderer each second.
+              if(key===this.signature &&
+                 e.style.getPropertyValue('transform').indexOf('scale(')>=0) return;
+              this.signature=key;
+              e.style.setProperty('zoom','1','important');
+              e.style.setProperty('left',x+'px','important');
+              e.style.setProperty('top',y+'px','important');
+              e.style.setProperty('transform-origin','center center','important');
+              e.style.setProperty('transform',
+                'translate(-50%, -50%) scale('+factor+')','important');
+            },
+            set:function(enabled,z,x,y,bottom){
+              this.enabled=!!enabled;
+              this.zoom=z;this.dx=x;this.dy=y;this.bottom=bottom;
+              this.signature='';
+              this.apply();
+            }
+          };
+          window.__seafCompanionLayout=state;
+          window.addEventListener('resize',function(){state.signature='';state.apply();});
+          // Handle SEAF's late initialization and SPA screen changes.
+          window.setInterval(function(){state.apply();},1200);
+        })();
+        """;
+
+    public GameViewport(Activity activity, WebView webView){
         super(activity);
-        web=view;
-        setClipChildren(true);
-        setClipToPadding(true);
+        web=webView;
         preferences=activity.getPreferences(0);
         rememberZoom=preferences.getBoolean("rememberZoom",true);
         autoCenter=preferences.getBoolean("autoCenter",true);
         zoom=rememberZoom?preferences.getFloat("companionZoomV3",1f):1f;
         zoom=Math.max(MIN_ZOOM,Math.min(MAX_ZOOM,zoom));
-        scaleDetector=new ScaleGestureDetector(activity,new ScaleGestureDetector.SimpleOnScaleGestureListener(){
-            @Override public boolean onScale(ScaleGestureDetector d){
-                if(originalMode||landscape)return false;
-                setZoom(zoom*d.getScaleFactor());
-                return true;
-            }
-        });
-        doubleTap=new GestureDetector(activity,new GestureDetector.SimpleOnGestureListener(){
-            @Override public boolean onDown(MotionEvent event){return true;}
-            @Override public boolean onDoubleTap(MotionEvent event){
-                if(originalMode||landscape)return false;
-                if(zoom>1.2f)resetFit();
-                else setZoom(1.7f);
-                return true;
-            }
-        });
-        // Single-finger touches remain owned by the actual game.
-        // Two-finger gestures are owned by the companion viewport.
+        setClipChildren(true);
+        setClipToPadding(true);
+        addView(web,new LayoutParams(-1,-1));
+        scaleDetector=new ScaleGestureDetector(activity,
+            new ScaleGestureDetector.SimpleOnScaleGestureListener(){
+                @Override public boolean onScale(ScaleGestureDetector detector){
+                    if(landscape||originalMode)return false;
+                    setZoom(zoom*detector.getScaleFactor());
+                    return true;
+                }
+            });
+        doubleTap=new GestureDetector(activity,
+            new GestureDetector.SimpleOnGestureListener(){
+                @Override public boolean onDown(MotionEvent e){return true;}
+                @Override public boolean onDoubleTap(MotionEvent e){
+                    if(landscape||originalMode)return false;
+                    if(zoom>1.2f)resetFit();
+                    else setZoom(1.7f);
+                    return true;
+                }
+            });
         web.setOnTouchListener((v,event)->{
-            if(originalMode||landscape)return false;
+            if(landscape||originalMode)return false;
             scaleDetector.onTouchEvent(event);
             doubleTap.onTouchEvent(event);
             int action=event.getActionMasked();
             if(action==MotionEvent.ACTION_POINTER_DOWN && event.getPointerCount()>=2){
                 multiTouch=true;
-                lastFocusX=(event.getX(0)+event.getX(1))*0.5f;
-                lastFocusY=(event.getY(0)+event.getY(1))*0.5f;
+                lastFocusX=(event.getX(0)+event.getX(1))/2f;
+                lastFocusY=(event.getY(0)+event.getY(1))/2f;
                 return true;
             }
             if(event.getPointerCount()>=2){
                 if(action==MotionEvent.ACTION_MOVE){
-                    float cx=(event.getX(0)+event.getX(1))*0.5f;
-                    float cy=(event.getY(0)+event.getY(1))*0.5f;
-                    offsetX+=(cx-lastFocusX)*Math.max(0.1f,fittedScale*zoom);
-                    offsetY+=(cy-lastFocusY)*Math.max(0.1f,fittedScale*zoom);
-                    lastFocusX=cx;lastFocusY=cy;
-                    layoutGame();
+                    float x=(event.getX(0)+event.getX(1))/2f;
+                    float y=(event.getY(0)+event.getY(1))/2f;
+                    offsetX+=(x-lastFocusX)/getResources().getDisplayMetrics().density;
+                    offsetY+=(y-lastFocusY)/getResources().getDisplayMetrics().density;
+                    lastFocusX=x;lastFocusY=y;
+                    applyLayout();
                 }
                 return true;
             }
             if(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL){
-                boolean consumed=multiTouch;
+                boolean wasMulti=multiTouch;
                 multiTouch=false;
-                return consumed;
+                return wasMulti;
             }
-            return multiTouch || scaleDetector.isInProgress();
-        });
-        addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or_,ob)->{
-            if(r-l!=or_-ol || b-t!=ob-ot)layoutGame();
+            return multiTouch||scaleDetector.isInProgress();
         });
     }
-    private int dp(int n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
-    public void setZoomListener(ZoomListener listener){this.listener=listener;notifyZoom();}
+
+    public void setZoomListener(ZoomListener l){listener=l;notifyZoom();}
+    private void notifyZoom(){if(listener!=null)listener.changed(zoom);}
     public float getZoom(){return zoom;}
     public boolean isOriginal(){return originalMode;}
+
     public void setModes(boolean isLandscape,boolean useOriginal,int reserveBottomDp){
-        boolean changed=landscape!=isLandscape || originalMode!=useOriginal;
+        boolean changed=landscape!=isLandscape||originalMode!=useOriginal;
         landscape=isLandscape;
         originalMode=useOriginal;
-        reservedBottom=dp(reserveBottomDp);
-
-        // Preserve the same WebView and its live game session on every rotation.
-        // Changing LayoutParams is safer than removing/readding the WebView.
-        FrameLayout.LayoutParams target;
-        if(isLandscape||useOriginal){
-            target=new FrameLayout.LayoutParams(-1,-1,Gravity.TOP|Gravity.LEFT);
-            web.setPivotX(0f);web.setPivotY(0f);
-            web.setScaleX(1f);web.setScaleY(1f);
-            web.setTranslationX(0f);web.setTranslationY(0f);
-        }else{
-            target=new FrameLayout.LayoutParams(dp(DESKTOP_WIDTH_DP),
-                dp(DESKTOP_HEIGHT_DP),Gravity.TOP|Gravity.LEFT);
-            web.setPivotX(0f);web.setPivotY(0f);
+        reservedBottomDp=reserveBottomDp;
+        // WebView remains match-parent at native screen size for all modes.
+        if(web.getLayoutParams().width!=-1||web.getLayoutParams().height!=-1){
+            web.setLayoutParams(new FrameLayout.LayoutParams(-1,-1));
         }
-        if(web.getParent()==null)addView(web,target);
-        else if(web.getParent()==this)web.setLayoutParams(target);
-        else {
-            ((ViewGroup)web.getParent()).removeView(web);
-            addView(web,target);
-        }
+        web.setScaleX(1f);web.setScaleY(1f);
+        web.setTranslationX(0f);web.setTranslationY(0f);
         if(changed&&autoCenter)offsetX=offsetY=0;
-        post(this::layoutGame);
+        post(this::applyLayout);
     }
-    public void setReservedBottom(int bottomDp){reservedBottom=dp(bottomDp);post(this::layoutGame);}
-    public void center(){offsetX=offsetY=0;post(this::layoutGame);}
-    public void pan(float horizontal,float vertical){
-        if(landscape||originalMode)return;
-        offsetX+=dp(Math.round(horizontal));offsetY+=dp(Math.round(vertical));
-        post(this::layoutGame);
+
+    public void onPageStarted(){pageGeneration++;}
+    public void onPageFinished(){
+        final int generation=pageGeneration;
+        postDelayed(()->{if(generation==pageGeneration)installAndApply();},500);
+        postDelayed(()->{if(generation==pageGeneration)installAndApply();},2100);
     }
-    public void setZoom(float next){
+
+    private boolean isGameDomain(){
+        Uri uri=Uri.parse(web.getUrl()==null?"":web.getUrl());
+        String host=uri.getHost();
+        return host!=null&&(host.equalsIgnoreCase("seaf.se")||host.equalsIgnoreCase("www.seaf.se"));
+    }
+    private void installAndApply(){
+        if(!isGameDomain()||web.getParent()!=this)return;
+        web.evaluateJavascript(PAGE_LAYOUT_JS, result->applyLayout());
+    }
+    private void applyLayout(){
+        if(web.getParent()!=this||!isGameDomain())return;
+        boolean active=!landscape&&!originalMode;
+        String script=String.format(Locale.US,
+            "(function(){var v=window.__seafCompanionLayout;if(v)v.set(%s,%.4f,%.2f,%.2f,%d);})();",
+            active?"true":"false",zoom,offsetX,offsetY,active?reservedBottomDp:0);
+        web.evaluateJavascript(script,null);
+    }
+    public void setReservedBottom(int heightDp){reservedBottomDp=heightDp;applyLayout();}
+    public void center(){offsetX=0;offsetY=0;applyLayout();}
+    public void pan(float x,float y){
         if(landscape||originalMode)return;
-        float adjusted=Math.max(MIN_ZOOM,Math.min(MAX_ZOOM,next));
-        if(Math.abs(adjusted-zoom)<0.001f)return;
-        zoom=adjusted;
+        offsetX=Math.max(-1500,Math.min(1500,offsetX+x));
+        offsetY=Math.max(-1500,Math.min(1500,offsetY+y));
+        applyLayout();
+    }
+    public void setZoom(float z){
+        if(landscape||originalMode)return;
+        float next=Math.max(MIN_ZOOM,Math.min(MAX_ZOOM,z));
+        if(Math.abs(next-zoom)<0.001f)return;
+        zoom=next;
         if(rememberZoom)preferences.edit().putFloat("companionZoomV3",zoom).apply();
-        layoutGame();notifyZoom();
+        applyLayout();notifyZoom();
     }
     public void adjustZoom(float delta){setZoom(zoom+delta);}
     public void resetFit(){setZoom(1f);center();}
-    public void fill(){ // Center-crop intentionally, only when explicitly selected.
-        if(getWidth()<1)return;
-        float w=dp(DESKTOP_WIDTH_DP),h=dp(DESKTOP_HEIGHT_DP);
-        float usableH=Math.max(1,getHeight()-reservedBottom);
-        float cover=Math.max(getWidth()/w,usableH/h);
-        float fit=Math.min(getWidth()/w,usableH/h);
-        setZoom(Math.max(1f,cover/Math.max(0.01f,fit)));
-        center();
+    public void fill(){
+        // Optional center crop; the panel retains the always-available Fit control.
+        setZoom(2f);center();
     }
     public void setRememberZoom(boolean remember){
         rememberZoom=remember;
         preferences.edit().putBoolean("rememberZoom",remember).apply();
         if(remember)preferences.edit().putFloat("companionZoomV3",zoom).apply();
     }
-    public void setAutoCenter(boolean center){
-        autoCenter=center;preferences.edit().putBoolean("autoCenter",center).apply();
-    }
-    private void notifyZoom(){if(listener!=null)listener.changed(zoom);}
-    private void layoutGame(){
-        if(landscape||originalMode||web.getParent()!=this)return;
-        int width=getWidth(),height=getHeight();
-        if(width<=0||height<=0)return;
-        int nativeW=dp(DESKTOP_WIDTH_DP),nativeH=dp(DESKTOP_HEIGHT_DP);
-        float usableH=Math.max(dp(160),height-reservedBottom);
-        fittedScale=Math.min((float)width/nativeW,usableH/nativeH);
-        float scale=fittedScale*zoom;
-        float shownW=nativeW*scale,shownH=nativeH*scale;
-        float maxX=Math.max(0,(shownW-width)*0.5f);
-        float maxY=Math.max(0,(shownH-usableH)*0.5f);
-        offsetX=Math.max(-maxX,Math.min(maxX,offsetX));
-        offsetY=Math.max(-maxY,Math.min(maxY,offsetY));
-        web.setPivotX(0f);web.setPivotY(0f);
-        web.setScaleX(scale);web.setScaleY(scale);
-        web.setX((width-shownW)*0.5f+offsetX);
-        web.setY((usableH-shownH)*0.5f+offsetY);
-        web.setVisibility(View.VISIBLE);
+    public void setAutoCenter(boolean value){
+        autoCenter=value;
+        preferences.edit().putBoolean("autoCenter",value).apply();
     }
 }
