@@ -1,323 +1,153 @@
 package com.seaf.companion;
 
 import android.app.Activity;
-import android.content.ContentValues;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
-import android.os.Environment;
-import android.provider.MediaStore;
-import java.io.OutputStream;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
-import android.content.res.Configuration;
-import android.os.Handler;
-import android.os.Looper;
-import android.view.Gravity;
-import android.view.View;
-import android.view.WindowInsets;
-import android.view.WindowInsetsController;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.FrameLayout;
-import android.widget.PopupMenu;
-import android.widget.TextView;
-import android.widget.Toast;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.*;
+import java.text.DateFormat;
+import java.util.Date;
 
 public class MainActivity extends Activity {
     private static final String GAME_URL = "https://seaf.se/";
-    private WebView webView;
-    private FrameLayout root;
-    private boolean immersive = true;
+    private WebView web;
+    private LinearLayout root, panel;
     private SessionRecorder recorder;
-    private CompanionDashboard dashboard;
-    private MobileControls mobileControls;
-    private boolean portraitFit = false;
-    private final Handler layoutHandler = new Handler(Looper.getMainLooper());
-    private final Runnable layoutTick = new Runnable() {
-        @Override public void run() {
-            applyPortraitFit();
-            layoutHandler.postDelayed(this, 2200);
-        }
-    };
+    private TextView timerStatus;
+    private EditText minutes;
+    private boolean panelVisible = true;
+    private int orientationMode;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        root = new FrameLayout(this);
-        root.setBackgroundColor(Color.BLACK);
-        webView = new WebView(this);
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setLoadsImagesAutomatically(true);
-        settings.setUseWideViewPort(true);
-        settings.setLoadWithOverviewMode(true);
-        settings.setSupportZoom(true);
-        settings.setBuiltInZoomControls(true);
-        settings.setDisplayZoomControls(false);
-        settings.setMediaPlaybackRequiresUserGesture(false);
+        getWindow().setStatusBarColor(0xFF07182C);
+        getWindow().setNavigationBarColor(0xFF07182C);
+        getWindow().getDecorView().setSystemUiVisibility(0);
+        web = new WebView(this);
+        WebSettings s=web.getSettings();
+        s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);
+        s.setLoadsImagesAutomatically(true);s.setUseWideViewPort(true);
+        s.setLoadWithOverviewMode(true);s.setSupportZoom(true);
+        s.setBuiltInZoomControls(true);s.setDisplayZoomControls(false);
+        s.setMediaPlaybackRequiresUserGesture(false);
         CookieManager.getInstance().setAcceptCookie(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
-        webView.setWebChromeClient(new WebChromeClient());
-        recorder = new SessionRecorder(this, webView);
-        mobileControls = new MobileControls(this, webView);
-        dashboard = new CompanionDashboard(this, () -> {}, () -> {portraitFit=false;getPreferences(0).edit().putBoolean("portraitFit",false).apply();applyPortraitFit();});
-        webView.setWebViewClient(new WebViewClient() {
-            @Override public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                applyPortraitFit();
-            }
-            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                Uri uri = request.getUrl();
-                String scheme = uri.getScheme();
-                if (!"http".equals(scheme) && !"https".equals(scheme)) {
-                    openBrowser(uri);
-                    return true;
-                }
-                // Keep OAuth authorization and its HTTPS callback in this WebView.
-                // The external browser has a separate cookie jar and cannot return
-                // ownership of seaf.se to this third-party Android application.
-                return false;
-            }
-        });
-        root.addView(webView, new FrameLayout.LayoutParams(-1, -1));
-        TextView menu = new TextView(this);
-        menu.setText("⋮");
-        menu.setTextColor(Color.WHITE);
-        menu.setTextSize(25);
-        menu.setGravity(Gravity.CENTER);
-        menu.setBackgroundColor(0xBB191919);
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.TOP | Gravity.END);
-        params.topMargin = dp(8);
-        params.rightMargin = dp(8);
-        root.addView(menu, params);
-        menu.setOnClickListener(this::showMenu);
-        setContentView(root);
-        int orientation = getPreferences(0).getInt("orientation", 0);
-        setOrientation(orientation);
-        immersive = getPreferences(0).getBoolean("immersive", true);
-        updateFullscreen();
-        portraitFit = getPreferences(0).getBoolean("portraitFit", false);
-        layoutHandler.post(layoutTick);
-        webView.loadUrl(GAME_URL);
-    }
-    private int dp(int n) { return (int)(n * getResources().getDisplayMetrics().density + .5f); }
-    private void openBrowser(Uri uri) {
-        try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); }
-        catch (Exception e) { Toast.makeText(this, "Cannot open link", Toast.LENGTH_SHORT).show(); }
-    }
-    private void showMenu(View anchor) {
-        PopupMenu popup = new PopupMenu(this, anchor);
-        popup.getMenu().add("Mobile Game Controls").setOnMenuItemClickListener(i -> {mobileControls.open();return true;});
-        popup.getMenu().add("Companion Dashboard").setOnMenuItemClickListener(i -> {dashboard.show();return true;});
-        popup.getMenu().add("Original Game (reset portrait fit)").setOnMenuItemClickListener(i -> {portraitFit=false;getPreferences(0).edit().putBoolean("portraitFit",false).apply();applyPortraitFit();return true;});
-        popup.getMenu().add("Auto rotate").setOnMenuItemClickListener(i -> { setOrientation(0); return true; });
-        popup.getMenu().add("Portrait").setOnMenuItemClickListener(i -> { setOrientation(1); return true; });
-        popup.getMenu().add("Landscape").setOnMenuItemClickListener(i -> { setOrientation(2); return true; });
-        popup.getMenu().add(immersive ? "Exit fullscreen" : "Enter fullscreen").setOnMenuItemClickListener(i -> {
-            immersive = !immersive;
-            getPreferences(0).edit().putBoolean("immersive", immersive).apply();
-            updateFullscreen(); return true;
-        });
-        popup.getMenu().add(portraitFit ? "Portrait fit: ON (tap to disable)" : "Portrait fit: OFF (tap to enable)")
-            .setOnMenuItemClickListener(i -> {
-                portraitFit = !portraitFit;
-                getPreferences(0).edit().putBoolean("portraitFit", portraitFit).apply();
-                applyPortraitFit();
+        CookieManager.getInstance().setAcceptThirdPartyCookies(web,true);
+        web.setWebChromeClient(new WebChromeClient());
+        web.setWebViewClient(new WebViewClient(){
+            @Override public boolean shouldOverrideUrlLoading(WebView w,WebResourceRequest req){
+                Uri u=req.getUrl();String scheme=u.getScheme();
+                if("https".equals(scheme)||"http".equals(scheme))return false;
+                try{startActivity(new Intent(Intent.ACTION_VIEW,u));}catch(Exception ignored){}
                 return true;
-            });
-        popup.getMenu().add("Zoom in").setOnMenuItemClickListener(i -> { webView.zoomIn(); return true; });
-        popup.getMenu().add("Zoom out").setOnMenuItemClickListener(i -> { webView.zoomOut(); return true; });
-        popup.getMenu().add(recorder.isRecording() ? "Stop capture session + export ZIP" : "Start capture session").setOnMenuItemClickListener(i -> {
-            if(recorder.isRecording()) recorder.stop(); else recorder.start();
-            return true;
-        });
-        if (recorder.isRecording()) popup.getMenu().add("Capture current screen now").setOnMenuItemClickListener(i -> {
-            recorder.recordNow(); return true;
-        });
-        popup.getMenu().add("Capture layout + screenshot").setOnMenuItemClickListener(i -> {
-            captureDiagnostics(); return true;
-        });
-        popup.getMenu().add("Refresh").setOnMenuItemClickListener(i -> { webView.reload(); return true; });
-        popup.getMenu().add("Browser login (fallback)").setOnMenuItemClickListener(i -> {
-            openBrowser(Uri.parse(webView.getUrl() == null ? GAME_URL : webView.getUrl())); return true;
-        });
-        popup.show();
-    }
-
-    // One tap exports a screenshot plus a structural layout/CSS inventory.
-    // No network requests, cookies, local storage, input values, or auth tokens are collected.
-    private static final String INSPECT_JS = """
-        (function () {
-          const safe = s => String(s || '').slice(0, 160);
-          const els = Array.from(document.querySelectorAll('*')).slice(0, 1800);
-          const rows = els.map((el, idx) => {
-            const r = el.getBoundingClientRect(), s = getComputedStyle(el);
-            const parts = [];
-            let n = el;
-            for (let j = 0; j < 4 && n && n.nodeType === 1; j++, n = n.parentElement) {
-              let part = n.tagName.toLowerCase();
-              if (n.id) part += '#' + CSS.escape(n.id).slice(0, 80);
-              else if (n.classList.length) part += '.' + Array.from(n.classList).slice(0, 3).map(x => CSS.escape(x)).join('.');
-              parts.unshift(part);
-            }
-            return {
-              i: idx, selector: safe(parts.join(' > ')),
-              tag: el.tagName.toLowerCase(),
-              rect: {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)},
-              style: {
-                display: s.display, position: s.position, overflow: s.overflow,
-                width: s.width, height: s.height, minWidth: s.minWidth,
-                maxWidth: s.maxWidth, fontSize: s.fontSize,
-                transform: s.transform, flexDirection: s.flexDirection,
-                gridTemplateColumns: s.gridTemplateColumns,
-                zIndex: s.zIndex, visibility: s.visibility
-              }
-            };
-          });
-          const v = window.visualViewport;
-          return JSON.stringify({
-            capturedAt: new Date().toISOString(),
-            origin: location.origin,
-            pathname: location.pathname,
-            viewport: {
-              innerWidth: innerWidth, innerHeight: innerHeight,
-              devicePixelRatio: devicePixelRatio,
-              screenWidth: screen.width, screenHeight: screen.height,
-              visualWidth: v ? v.width : null, visualHeight: v ? v.height : null,
-              visualScale: v ? v.scale : null,
-              orientation: screen.orientation ? screen.orientation.type : null
-            },
-            document: {
-              scrollWidth: document.documentElement.scrollWidth,
-              scrollHeight: document.documentElement.scrollHeight,
-              bodyWidth: document.body ? document.body.scrollWidth : null,
-              bodyHeight: document.body ? document.body.scrollHeight : null
-            },
-            nodesScanned: els.length, elements: rows
-          });
-        })();
-        """;
-
-    private void captureDiagnostics() {
-        if (!"seaf.se".equalsIgnoreCase(Uri.parse(webView.getUrl() == null ? GAME_URL : webView.getUrl()).getHost())) {
-            Toast.makeText(this, "Capture only supported on seaf.se", Toast.LENGTH_LONG).show();
-            return;
-        }
-        String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
-                .format(new java.util.Date());
-        int width = webView.getWidth(), height = webView.getHeight();
-        if (width > 0 && height > 0) {
-            try {
-                Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-                webView.draw(new Canvas(bitmap));
-                Uri image = createExport(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                        "seaf-" + stamp + ".png", "image/png");
-                try (OutputStream out = getContentResolver().openOutputStream(image)) {
-                    if (out == null || !bitmap.compress(Bitmap.CompressFormat.PNG, 100, out))
-                        throw new Exception("PNG export failed");
-                }
-                bitmap.recycle();
-            } catch (Exception e) {
-                Toast.makeText(this, "Screenshot failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
-            }
-        }
-        webView.evaluateJavascript(INSPECT_JS, encoded -> {
-            try {
-                String json = (String) new org.json.JSONTokener(encoded).nextValue();
-                Uri output = createExport(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                        "seaf-" + stamp + ".json", "application/json");
-                try (OutputStream out = getContentResolver().openOutputStream(output)) {
-                    if (out == null) throw new Exception("JSON export failed");
-                    out.write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                }
-                Toast.makeText(this, "Saved seaf-" + stamp + " files in Downloads/SEAFCompanion",
-                        Toast.LENGTH_LONG).show();
-            } catch (Exception e) {
-                Toast.makeText(this, "Layout export failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
         });
+        recorder=new SessionRecorder(this,web);
+        panelVisible=getPreferences(0).getBoolean("showPanel",true);
+        orientationMode=getPreferences(0).getInt("orientation",0);
+        setRequestedOrientation(orientationMode==1?ActivityInfo.SCREEN_ORIENTATION_PORTRAIT:
+            orientationMode==2?ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE:ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        renderLayout();
+        web.loadUrl(GAME_URL);
     }
-
-    private Uri createExport(Uri collection, String name, String mime) {
-        ContentValues values = new ContentValues();
-        values.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
-        values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
-        values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SEAFCompanion");
-        Uri uri = getContentResolver().insert(collection, values);
-        if (uri == null) throw new IllegalStateException("Could not create export");
-        return uri;
+    private int dp(int v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}
+    private TextView label(String value,int size){
+        TextView t=new TextView(this);t.setText(value);t.setTextSize(size);
+        t.setTextColor(Color.WHITE);t.setPadding(dp(8),dp(4),dp(8),dp(4));return t;
     }
-
-    private void applyPortraitFit() {
-        if (webView == null || webView.getUrl() == null) return;
-        Uri uri = Uri.parse(webView.getUrl());
-        if (!"seaf.se".equalsIgnoreCase(uri.getHost())) return;
-        boolean enabled = portraitFit &&
-            getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
-        String js = "(function(){"+
-            "var e=document.querySelector('#page-home > .scale-me.pos-abs-c');"+
-            "if(!e)return;"+
-            "var key='seaf-companion-original';"+
-            "if(!e.hasAttribute('data-'+key)){"+
-            "e.setAttribute('data-'+key,'1');"+
-            "e.dataset.seafOriginalZoom=e.style.getPropertyValue('zoom');"+
-            "e.dataset.seafOriginalTransform=e.style.getPropertyValue('transform');"+
-            "e.dataset.seafOriginalLeft=e.style.getPropertyValue('left');"+
-            "e.dataset.seafOriginalTop=e.style.getPropertyValue('top');"+
-            "e.dataset.seafOriginalOrigin=e.style.getPropertyValue('transform-origin');"+
-            "}"+
-            "if("+enabled+"){"+
-            "var frame=document.getElementById('page-home');"+
-            "var w=frame.getBoundingClientRect().width;"+
-            "if(w<100)return;"+
-            "var scale=Math.max(0.16,Math.min(1,(w-4)/1600));"+
-            "e.style.setProperty('zoom','1','important');"+
-            "e.style.setProperty('left','50%','important');"+
-            "e.style.setProperty('top','50%','important');"+
-            "e.style.setProperty('transform-origin','center center','important');"+
-            "e.style.setProperty('transform','translate(-50%, -50%) scale('+scale+')','important');"+
-            "}else if(e.hasAttribute('data-'+key)){"+
-            "['zoom','transform','left','top','transform-origin'].forEach(function(p){e.style.removeProperty(p)});"+
-            "var names={'zoom':'Zoom','transform':'Transform','left':'Left','top':'Top','transform-origin':'Origin'};"+
-            "Object.keys(names).forEach(function(p){var v=e.dataset['seafOriginal'+names[p]];if(v)e.style.setProperty(p,v)});"+
-            "e.removeAttribute('data-'+key);"+
-            "}"+
-            "})();";
-        webView.evaluateJavascript(js, null);
+    private Button action(String text,Runnable callback){
+        Button b=new Button(this);b.setText(text);b.setAllCaps(false);
+        b.setTextSize(12);b.setMinHeight(0);b.setMinimumHeight(0);
+        b.setPadding(dp(6),0,dp(6),0);
+        b.setOnClickListener(v->callback.run());return b;
     }
-    @Override public void onConfigurationChanged(Configuration config) {
-        super.onConfigurationChanged(config);
-        webView.postDelayed(this::applyPortraitFit, 350);
+    private void renderLayout(){
+        if(web.getParent()!=null)((android.view.ViewGroup)web.getParent()).removeView(web);
+        root=new LinearLayout(this);
+        boolean landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
+        root.setOrientation(landscape?LinearLayout.HORIZONTAL:LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.BLACK);
+        root.addView(web,new LinearLayout.LayoutParams(0==1?0:(landscape?0:-1),landscape?-1:0,1f));
+        panel=new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackgroundColor(0xFF07182C);
+        panel.setPadding(dp(6),dp(6),dp(6),dp(4));
+        if(landscape)root.addView(panel,new LinearLayout.LayoutParams(dp(235),-1));
+        else root.addView(panel,new LinearLayout.LayoutParams(-1,dp(192)));
+        buildPanel(landscape);
+        panel.setVisibility(panelVisible?View.VISIBLE:View.GONE);
+        setContentView(root);
     }
-    private void setOrientation(int mode) {
-        getPreferences(0).edit().putInt("orientation", mode).apply();
-        setRequestedOrientation(mode == 1 ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT :
-            mode == 2 ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
-    }
-    private void updateFullscreen() {
-        if (android.os.Build.VERSION.SDK_INT >= 30) {
-            WindowInsetsController controller = getWindow().getInsetsController();
-            if (controller != null) {
-                if (immersive) controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
-                else controller.show(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
-                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            }
-        } else {
-            getWindow().getDecorView().setSystemUiVisibility(immersive ?
-                (View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY) : 0);
+    private void buildPanel(boolean landscape){
+        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView brand=label("SEAF COMPANION",14);brand.setTypeface(null,1);
+        header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        header.addView(action("Hide",()->{panelVisible=false;getPreferences(0).edit().putBoolean("showPanel",false).apply();renderLayout();}),
+            new LinearLayout.LayoutParams(dp(68),dp(38)));
+        panel.addView(header);
+        panel.addView(label("Game status: Live sync not connected",11));
+        timerStatus=label("",12);panel.addView(timerStatus);refreshTimer();
+        LinearLayout controls=new LinearLayout(this);
+        controls.addView(action("Refresh",()->web.reload()),new LinearLayout.LayoutParams(0,dp(40),1));
+        controls.addView(action(recorder.isRecording()?"Stop + ZIP":"Capture",()->{
+            if(recorder.isRecording())recorder.stop();else recorder.start();
+            renderLayout();
+        }),new LinearLayout.LayoutParams(0,dp(40),1));
+        controls.addView(action("Rotate",()->{
+            int mode=getResources().getConfiguration().orientation==Configuration.ORIENTATION_PORTRAIT?2:1;
+            getPreferences(0).edit().putInt("orientation",mode).apply();
+            setRequestedOrientation(mode==1?ActivityInfo.SCREEN_ORIENTATION_PORTRAIT:ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        }),new LinearLayout.LayoutParams(0,dp(40),1));
+        panel.addView(controls);
+        LinearLayout timerRow=new LinearLayout(this);timerRow.setGravity(Gravity.CENTER_VERTICAL);
+        minutes=new EditText(this);minutes.setSingleLine(true);minutes.setInputType(2);
+        minutes.setTextColor(Color.WHITE);minutes.setHintTextColor(0xFFB0B9C4);
+        minutes.setHint("Minutes");minutes.setTextSize(14);
+        timerRow.addView(minutes,new LinearLayout.LayoutParams(0,dp(42),1));
+        timerRow.addView(action("Set reminder",this::setTimer),new LinearLayout.LayoutParams(dp(128),dp(42)));
+        panel.addView(timerRow);
+        if(landscape){
+            panel.addView(label("Reminders are manual; original game remains fully available.",11));
         }
     }
-    @Override public void onBackPressed() {
-        if (webView.canGoBack()) webView.goBack();
-        else super.onBackPressed();
+    private void refreshTimer(){
+        long at=getPreferences(0).getLong("timerDue",0);
+        timerStatus.setText(at==0?"No timer set":("Reminder: "+DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(new Date(at))));
     }
-    @Override protected void onPause() { CookieManager.getInstance().flush(); super.onPause(); }
-    @Override protected void onDestroy() { layoutHandler.removeCallbacks(layoutTick); recorder.close(); root.removeView(webView); webView.destroy(); super.onDestroy(); }
+    private void setTimer(){
+        int amount;
+        try{amount=Integer.parseInt(minutes.getText().toString());}catch(Exception e){amount=0;}
+        if(amount<1||amount>10080){Toast.makeText(this,"Enter 1–10080 minutes",Toast.LENGTH_SHORT).show();return;}
+        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},5);
+        long at=System.currentTimeMillis()+amount*60000L;
+        Intent intent=new Intent(this,TimerReceiver.class).putExtra("label","SEAF timer");
+        PendingIntent pi=PendingIntent.getBroadcast(this,1001,intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+        ((AlarmManager)getSystemService(Context.ALARM_SERVICE)).setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,at,pi);
+        getPreferences(0).edit().putLong("timerDue",at).apply();refreshTimer();
+        Toast.makeText(this,"Local reminder scheduled",Toast.LENGTH_SHORT).show();
+    }
+    @Override public void onConfigurationChanged(Configuration config){
+        super.onConfigurationChanged(config);renderLayout();
+    }
+    @Override public void onBackPressed(){
+        if(!panelVisible){panelVisible=true;getPreferences(0).edit().putBoolean("showPanel",true).apply();renderLayout();}
+        else if(web.canGoBack())web.goBack();else super.onBackPressed();
+    }
+    @Override protected void onPause(){CookieManager.getInstance().flush();super.onPause();}
+    @Override protected void onDestroy(){recorder.close();if(web.getParent()!=null)((android.view.ViewGroup)web.getParent()).removeView(web);web.destroy();super.onDestroy();}
 }
