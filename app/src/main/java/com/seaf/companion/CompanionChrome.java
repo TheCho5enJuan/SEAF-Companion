@@ -114,6 +114,12 @@ public final class CompanionChrome {
                     p.setStyle(Paint.Style.FILL);
                     path(canvas,34,13,39,13,38,21,31,17);
                     break;
+                case "close":
+                    // Explicit close/exit, visually distinct from collapse.
+                    p.setColor(0xFFFF6476);p.setStrokeWidth(4.5f);
+                    line(canvas,17,17,31,31);
+                    line(canvas,31,17,17,31);
+                    break;
                 case "expand":
                     p.setStrokeWidth(3.2f);
                     path(canvas,15,24,33,24);path(canvas,24,15,24,33);
