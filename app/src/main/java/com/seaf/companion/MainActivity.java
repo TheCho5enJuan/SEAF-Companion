@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
     private WebView webView;
     private FrameLayout root;
     private boolean immersive = true;
+    private SessionRecorder recorder;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -51,6 +52,7 @@ public class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.setWebChromeClient(new WebChromeClient());
+        recorder = new SessionRecorder(this, webView);
         webView.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
@@ -101,6 +103,13 @@ public class MainActivity extends Activity {
         });
         popup.getMenu().add("Zoom in").setOnMenuItemClickListener(i -> { webView.zoomIn(); return true; });
         popup.getMenu().add("Zoom out").setOnMenuItemClickListener(i -> { webView.zoomOut(); return true; });
+        popup.getMenu().add(recorder.isRecording() ? "Stop capture session + export ZIP" : "Start capture session").setOnMenuItemClickListener(i -> {
+            if(recorder.isRecording()) recorder.stop(); else recorder.start();
+            return true;
+        });
+        if (recorder.isRecording()) popup.getMenu().add("Capture current screen now").setOnMenuItemClickListener(i -> {
+            recorder.recordNow(); return true;
+        });
         popup.getMenu().add("Capture layout + screenshot").setOnMenuItemClickListener(i -> {
             captureDiagnostics(); return true;
         });
@@ -238,5 +247,5 @@ public class MainActivity extends Activity {
         else super.onBackPressed();
     }
     @Override protected void onPause() { CookieManager.getInstance().flush(); super.onPause(); }
-    @Override protected void onDestroy() { root.removeView(webView); webView.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() { recorder.close(); root.removeView(webView); webView.destroy(); super.onDestroy(); }
 }
