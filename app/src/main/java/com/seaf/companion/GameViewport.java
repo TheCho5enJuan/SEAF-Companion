@@ -210,7 +210,11 @@ public final class GameViewport extends FrameLayout {
             heightFit?"height":"overview",focusRegion);
         web.evaluateJavascript(script,null);
     }
-    public void setReservedBottom(int heightDp){reservedBottomDp=heightDp;applyLayout();}
+    public void setReservedBottom(int heightDp){
+        if(reservedBottomDp==heightDp)return;
+        reservedBottomDp=heightDp;
+        applyLayout();
+    }
     public void center(){offsetX=0;offsetY=0;applyLayout();}
     public boolean isHeightFit(){return heightFit;}
     public int getFocusRegion(){return focusRegion;}
