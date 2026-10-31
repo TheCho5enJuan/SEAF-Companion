@@ -30,6 +30,9 @@ public class MainActivity extends Activity {
     private boolean zoomRestored = false;
     private float savedPortraitScale = 0f;
     private int zoomRestoreGeneration = 0;
+    private int stableLayoutSamples = 0;
+    private String previousLayout = "";
+    private boolean restoringProgrammatically = false;
     private final Handler zoomHandler = new Handler(Looper.getMainLooper());
     private final Runnable saveZoom = () -> {
         if(zoomRestored && !landscape && web != null) {
@@ -40,15 +43,43 @@ public class MainActivity extends Activity {
             }
         }
     };
-    private void restoreZoom(){
+    private void waitForGameLayout(int generation,int attempt){
+        if(generation!=zoomRestoreGeneration || landscape || zoomRestored || web==null)return;
+        // SEAF sizes its widescreen game asynchronously after WebView onPageFinished.
+        // Wait for DOM width/height and the prominent game container to stop changing.
+        web.evaluateJavascript("(function(){var d=document.documentElement;"+
+          "var game=document.querySelector('#page-home')||document.querySelector('.scale-me')||document.body;"+
+          "var r=game.getBoundingClientRect();return [d.scrollWidth,d.scrollHeight,"+
+          "Math.round(r.width),Math.round(r.height),innerWidth,innerHeight].join(',')})()",
+          result->{
+              if(generation!=zoomRestoreGeneration || zoomRestored)return;
+              String layout=result==null?"":result;
+              if(layout.equals(previousLayout) && layout.length()>6)stableLayoutSamples++;
+              else {previousLayout=layout;stableLayoutSamples=0;}
+              if(stableLayoutSamples>=2 || attempt>=18){
+                  restoreZoom(generation);
+              }else{
+                  zoomHandler.postDelayed(()->waitForGameLayout(generation,attempt+1),350);
+              }
+          });
+    }
+    private void restoreZoom(int generation){
+        if(generation!=zoomRestoreGeneration || zoomRestored)return;
         if(landscape){zoomRestored=true;return;}
         zoomHandler.removeCallbacks(saveZoom);
-        if(savedPortraitScale >= 0.15f && savedPortraitScale <= 3.5f) {
+        restoringProgrammatically=true;
+        if(savedPortraitScale>=0.15f && savedPortraitScale<=3.5f){
             float current=web.getScale();
-            if(current>0) web.zoomBy(Math.max(0.01f,Math.min(4.99f,savedPortraitScale/current)));
+            if(current>0f && Math.abs(current-savedPortraitScale)>0.015f)
+                web.zoomBy(Math.max(0.05f,Math.min(4.99f,savedPortraitScale/current)));
         }
-        zoomRestored=true;
-        updateZoomUi();
+        zoomHandler.postDelayed(()->{
+            if(generation!=zoomRestoreGeneration)return;
+            centerPortrait();
+            restoringProgrammatically=false;
+            zoomRestored=true;
+            updateZoomUi();
+        },300);
     }
     private FrameLayout base;
     private LinearLayout pane;
@@ -77,15 +108,18 @@ public class MainActivity extends Activity {
             @Override public void onScaleChanged(WebView view,float oldScale,float newScale){
                 super.onScaleChanged(view,oldScale,newScale);
                 if(!landscape) updateZoomUi();
-                if(zoomRestored && !landscape) {
+                if(zoomRestored && !landscape && !restoringProgrammatically) {
                     zoomHandler.removeCallbacks(saveZoom);
                     zoomHandler.postDelayed(saveZoom,450);
                 }
             }
-            @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap favicon){zoomRestored=false;++zoomRestoreGeneration;zoomHandler.removeCallbacks(saveZoom);}
+            @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap favicon){
+                zoomRestored=false;++zoomRestoreGeneration;stableLayoutSamples=0;previousLayout="";
+                zoomHandler.removeCallbacks(saveZoom);
+            }
             @Override public void onPageFinished(WebView v,String url){
                 final int generation=zoomRestoreGeneration;
-                v.postDelayed(()->{if(generation==zoomRestoreGeneration && !zoomRestored)restoreZoom();},500);
+                v.postDelayed(()->waitForGameLayout(generation,0),500);
             }
             @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){
                 String scheme=r.getUrl().getScheme();
@@ -197,6 +231,7 @@ public class MainActivity extends Activity {
         float current=web.getScale();
         float target=Math.max(0.25f,Math.min(3.5f,current+change));
         if(current>0f)web.zoomBy(Math.max(0.05f,Math.min(4.99f,target/current)));
+        web.postDelayed(this::centerPortrait,180);
         updateZoomUi();
     }
     private void panHorizontal(float delta){
