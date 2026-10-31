@@ -20,17 +20,19 @@ public class MainActivity extends Activity {
     private LinearLayout panel;
     private ImageView ambientView;
     private boolean ambientEnabled;
-    // The blurred backdrop is an adaptive live mirror, not a 12-second screenshot.
-    // Target roughly 15 fps, backing off if WebView capture slows the UI thread.
+    // Live mirror backing the letterbox blur. The frame shown by ImageView
+    // must never be modified: render-thread uploads are asynchronous.
     private boolean ambientForeground=false;
-    private android.graphics.Bitmap[] ambientBuffers=new android.graphics.Bitmap[2];
-    private int ambientBufferIndex=0;
+    private android.graphics.Bitmap ambientScratch;
+    private android.graphics.Bitmap ambientLastFrame;
+    private int ambientWebBackground=Integer.MIN_VALUE;
     private final Runnable ambientTick=new Runnable(){public void run(){
         if(!ambientEnabled||!ambientForeground||isFinishing())return;
         long started=android.os.SystemClock.uptimeMillis();
         updateAmbient();
         long cost=android.os.SystemClock.uptimeMillis()-started;
-        long target=cost>35?200:cost>18?120:66;
+        // Keep the backdrop live, but avoid excessive UI-thread contention.
+        long target=cost>35?200:cost>18?120:83;
         handler.postDelayed(this,Math.max(16,target-cost));
     }};
     private TextView countdown, timerButton, bellBadge;
@@ -73,6 +75,8 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient(){
             @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){
                 if(viewport!=null)viewport.onPageStarted();
+                // Retain the last good blur until the new page paints a real frame.
+                handler.removeCallbacks(ambientTick);
             }
             @Override public void onPageFinished(WebView v,String url){
                 if(viewport!=null)viewport.onPageFinished();
@@ -279,6 +283,7 @@ public class MainActivity extends Activity {
         ambientView=new ImageView(this);
         ambientView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         ambientView.setVisibility(ambientEnabled?View.VISIBLE:View.GONE);
+        if(ambientLastFrame!=null)ambientView.setImageBitmap(ambientLastFrame);
         root.addView(ambientView,new FrameLayout.LayoutParams(-1,-1));
         if(android.os.Build.VERSION.SDK_INT>=31){
             ambientView.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(
@@ -645,10 +650,16 @@ public class MainActivity extends Activity {
     }
     private void applyAmbient(){
         handler.removeCallbacks(ambientTick);
-        if(ambientView!=null)ambientView.setVisibility(ambientEnabled?View.VISIBLE:View.GONE);
-        // Only make the page's background transparent; do not change the game stage.
-        // This allows the blurred snapshot beneath the WebView to fill letterboxing.
-        web.setBackgroundColor(ambientEnabled?Color.TRANSPARENT:Color.BLACK);
+        if(ambientView!=null)
+            ambientView.setVisibility(ambientEnabled?View.VISIBLE:View.GONE);
+        // Do not repeatedly invalidate the WebView compositor on every resume.
+        int color=ambientEnabled?Color.TRANSPARENT:Color.BLACK;
+        if(ambientWebBackground!=color){
+            web.setBackgroundColor(color);
+            ambientWebBackground=color;
+        }
+        // Transparent page chrome is necessary to expose the blurred backdrop
+        // behind letterboxed content. The game stage itself is not modified.
         web.evaluateJavascript(ambientEnabled?
             "(function(){var s=document.getElementById('seaf-ambient-transparent');"+
             "if(!s){s=document.createElement('style');s.id='seaf-ambient-transparent';"+
@@ -658,38 +669,56 @@ public class MainActivity extends Activity {
             "if(s)s.remove();})()",null);
         if(ambientEnabled&&ambientForeground)handler.post(ambientTick);
     }
+    private boolean usableAmbientFrame(android.graphics.Bitmap image){
+        // Reject black/white intermediate WebView frames when Chromium is
+        // waiting for GPU tiles; never publish these as a new blur frame.
+        int lit=0,white=0,total=0;
+        for(int y=5;y<image.getHeight();y+=8)
+            for(int x=5;x<image.getWidth();x+=8){
+                int rgb=image.getPixel(x,y);
+                int r=(rgb>>16)&255,g=(rgb>>8)&255,b=rgb&255;
+                if(Math.max(r,Math.max(g,b))>28)lit++;
+                if(r>248&&g>248&&b>248)white++;
+                total++;
+            }
+        return lit>Math.max(5,total/80)&&white<total*0.92f;
+    }
     private void updateAmbient(){
         if(!ambientEnabled||!ambientForeground||web==null||ambientView==null||
-           ambientView.getVisibility()!=View.VISIBLE||web.getWidth()<1||web.getHeight()<1)return;
+           ambientView.getVisibility()!=View.VISIBLE||
+           web.getWidth()<1||web.getHeight()<1)return;
         try{
-            // Sample the visible game area, not the black letterbox surrounding it.
-            // A small reusable buffer is expanded and blurred by the GPU.
-            final int width=256;
-            final int height=144;
-            android.graphics.Bitmap target=ambientBuffers[ambientBufferIndex];
-            if(target==null||target.getWidth()!=width||target.getHeight()!=height){
-                target=android.graphics.Bitmap.createBitmap(
+            // Sample the game without resizing the on-screen WebView. This
+            // inexpensive bitmap is only an offscreen capture buffer.
+            final int width=256,height=144;
+            if(ambientScratch==null||ambientScratch.getWidth()!=width||
+                ambientScratch.getHeight()!=height)
+                ambientScratch=android.graphics.Bitmap.createBitmap(
                     width,height,android.graphics.Bitmap.Config.RGB_565);
-                ambientBuffers[ambientBufferIndex]=target;
-            }
             float sourceWidth=web.getWidth();
             float sourceHeight=Math.min(web.getHeight(),sourceWidth*height/width);
+            if(sourceHeight<1)return;
             float centerY=web.getHeight()/2f;
-            if(!landscape&&panel!=null&&Math.abs(panel.getTranslationY())<dp(24)){
+            if(!landscape&&panel!=null&&Math.abs(panel.getTranslationY())<dp(24))
                 centerY=(web.getHeight()-panel.getHeight())/2f;
-            }
             float top=Math.max(0,Math.min(web.getHeight()-sourceHeight,
                 centerY-sourceHeight/2f));
-            android.graphics.Canvas capture=new android.graphics.Canvas(target);
+            android.graphics.Canvas capture=new android.graphics.Canvas(ambientScratch);
             capture.drawColor(Color.BLACK);
             capture.scale(width/sourceWidth,height/sourceHeight);
             capture.translate(0,-top);
             web.draw(capture);
-            ambientView.setImageBitmap(target);
-            // Alternate textures so the render thread is not displaying the
-            // same bitmap as the UI thread is updating.
-            ambientBufferIndex=1-ambientBufferIndex;
-        }catch(Exception ignored){}
+            if(!usableAmbientFrame(ambientScratch))return;
+            // Copy to a NEVER-mutated frame. Reusing a displayed bitmap caused
+            // the renderer to read pixels while the next capture wrote them.
+            android.graphics.Bitmap ready=ambientScratch.copy(
+                android.graphics.Bitmap.Config.RGB_565,false);
+            if(ready==null)return;
+            ambientLastFrame=ready;
+            ambientView.setImageBitmap(ready);
+        }catch(Exception ignored){
+            // Keep the last good frame rather than flashing black on failure.
+        }
     }
     private void chooseAutoHide(){
         final int[] values={0,5,10,15,30};
