@@ -14,7 +14,18 @@ import android.widget.*;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private WebView web;
+    private GameWebView web;
+    private SeekBar zoomSlider;
+    private TextView zoomLabel;
+    private boolean updatingZoomUi = false;
+    private class GameWebView extends WebView {
+        GameWebView(Context ctx){ super(ctx); }
+        int maxHorizontal(){return Math.max(0,computeHorizontalScrollRange()-computeHorizontalScrollExtent());}
+        void moveHorizontal(float fraction){
+            int max=maxHorizontal();
+            scrollTo(Math.round(max*Math.max(0f,Math.min(1f,fraction))),getScrollY());
+        }
+    }
     private boolean landscape;
     private boolean zoomRestored = false;
     private float savedPortraitScale = 0f;
@@ -36,6 +47,7 @@ public class MainActivity extends Activity {
             if(current>0) web.zoomBy(Math.max(0.01f,Math.min(4.99f,savedPortraitScale/current)));
         }
         zoomRestored=true;
+        updateZoomUi();
     }
     private FrameLayout base;
     private LinearLayout pane;
@@ -50,7 +62,7 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(0xFF07182C);
         getWindow().setNavigationBarColor(0xFF07182C);
         savedPortraitScale=getPreferences(0).getFloat("savedPortraitScale",0f);
-        web=new WebView(this);
+        web=new GameWebView(this);
         WebSettings s=web.getSettings();
         s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);
         s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);
@@ -63,6 +75,7 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient(){
             @Override public void onScaleChanged(WebView view,float oldScale,float newScale){
                 super.onScaleChanged(view,oldScale,newScale);
+                if(!landscape) updateZoomUi();
                 if(zoomRestored && !landscape) {
                     zoomHandler.removeCallbacks(saveZoom);
                     zoomHandler.postDelayed(saveZoom,450);
@@ -96,6 +109,7 @@ public class MainActivity extends Activity {
     }
     private void build(){
         landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
+        zoomSlider=null;zoomLabel=null;
         if(web.getParent()!=null)((android.view.ViewGroup)web.getParent()).removeView(web);
         base=new FrameLayout(this);base.setBackgroundColor(Color.BLACK);
         base.addView(web,new FrameLayout.LayoutParams(-1,-1));
@@ -106,7 +120,7 @@ public class MainActivity extends Activity {
         pane=new LinearLayout(this);pane.setOrientation(LinearLayout.VERTICAL);
         pane.setPadding(dp(10),dp(8),dp(10),dp(8));pane.setBackgroundColor(0xF007182C);
         FrameLayout.LayoutParams pos=new FrameLayout.LayoutParams(
-          landscape?dp(expanded?260:76):-1,dp(expanded?(landscape?220:208):44),
+          landscape?dp(expanded?260:76):-1,dp(expanded?(landscape?220:290):44),
           landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM);
         pos.setMargins(landscape?0:dp(8),0,landscape?dp(8):dp(8),landscape?0:dp(8));
         base.addView(pane,pos);
@@ -131,24 +145,62 @@ public class MainActivity extends Activity {
             }
             pane.addView(actions);
             if(!landscape) {
-                LinearLayout zoom=new LinearLayout(this);
-                zoom.setPadding(0,dp(8),0,0);
-                zoom.addView(control("−",()->web.zoomOut()),new LinearLayout.LayoutParams(0,dp(42),1));
-                zoom.addView(control("Overview",this::resetOverview),new LinearLayout.LayoutParams(0,dp(42),2));
-                zoom.addView(control("+",()->web.zoomIn()),new LinearLayout.LayoutParams(0,dp(42),1));
-                pane.addView(zoom);
+                zoomLabel=text("Zoom",12,true);
+                pane.addView(zoomLabel,new LinearLayout.LayoutParams(-1,dp(25)));
+                LinearLayout zoomRow=new LinearLayout(this);
+                zoomRow.setGravity(Gravity.CENTER_VERTICAL);
+                zoomRow.addView(control("−",()->changeZoom(-0.12f)),new LinearLayout.LayoutParams(dp(45),dp(38)));
+                zoomSlider=new SeekBar(this);
+                zoomSlider.setMax(300);
+                zoomSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+                    public void onProgressChanged(SeekBar bar,int progress,boolean fromUser){
+                        if(fromUser && !updatingZoomUi){
+                            float target=0.5f+progress/100f;
+                            float current=web.getScale();
+                            if(current>0f) web.zoomBy(Math.max(0.05f,Math.min(4.99f,target/current)));
+                            updateZoomUi();
+                        }
+                    }
+                    public void onStartTrackingTouch(SeekBar bar){}
+                    public void onStopTrackingTouch(SeekBar bar){}
+                });
+                zoomRow.addView(zoomSlider,new LinearLayout.LayoutParams(0,dp(40),1));
+                zoomRow.addView(control("+",()->changeZoom(0.12f)),new LinearLayout.LayoutParams(dp(45),dp(38)));
+                pane.addView(zoomRow);
+                LinearLayout position=new LinearLayout(this);
+                position.setPadding(0,dp(3),0,0);
+                position.addView(control("←",()->panHorizontal(-0.15f)),new LinearLayout.LayoutParams(0,dp(36),1));
+                position.addView(control("Portrait Center",this::centerPortrait),new LinearLayout.LayoutParams(0,dp(36),3));
+                position.addView(control("→",()->panHorizontal(0.15f)),new LinearLayout.LayoutParams(0,dp(36),1));
+                pane.addView(position);
+                updateZoomUi();
             }
         }
         setContentView(base);updateTimer();
     }
-    private void resetOverview(){
-        // Reload only on explicit Overview action, preserving existing cookies.
-        web.getSettings().setLoadWithOverviewMode(true);
-        savedPortraitScale=0f;
-        getPreferences(0).edit().remove("savedPortraitScale").apply();
-        zoomRestored=false;
-        web.setInitialScale(0);
-        web.reload();
+    private void updateZoomUi(){
+        if(web==null||landscape)return;
+        float scale=web.getScale();
+        if(zoomLabel!=null)zoomLabel.setText(String.format(Locale.US,"Zoom  %.0f%%",scale*100));
+        if(zoomSlider!=null && !updatingZoomUi){
+            updatingZoomUi=true;
+            zoomSlider.setProgress(Math.max(0,Math.min(300,Math.round((scale-0.5f)*100))));
+            updatingZoomUi=false;
+        }
+    }
+    private void changeZoom(float change){
+        float current=web.getScale();
+        float target=Math.max(0.5f,Math.min(3.5f,current+change));
+        if(current>0f)web.zoomBy(Math.max(0.05f,Math.min(4.99f,target/current)));
+        updateZoomUi();
+    }
+    private void panHorizontal(float delta){
+        int max=web.maxHorizontal();
+        web.scrollTo(Math.max(0,Math.min(max,web.getScrollX()+Math.round(max*delta))),web.getScrollY());
+    }
+    private void centerPortrait(){
+        // Recenters the document horizontally without reloading or changing zoom.
+        web.post(()->web.moveHorizontal(0.5f));
     }
     private void updateTimer(){
         if(countdown==null)return;
