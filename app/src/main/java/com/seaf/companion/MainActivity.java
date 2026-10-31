@@ -18,9 +18,9 @@ public class MainActivity extends Activity {
     private GameViewport viewport;
     private FrameLayout root;
     private LinearLayout panel;
-    private TextView countdown, zoomLabel, viewLabel;
+    private TextView countdown, zoomLabel, viewLabel, zoomToggle, timerButton;
     private SeekBar slider;
-    private boolean expanded,original,fullscreen,landscape;
+    private boolean expanded,zoomExpanded,original,fullscreen,landscape;
     private boolean changingSlider=false;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final Runnable clock=new Runnable(){public void run(){updateTimer();handler.postDelayed(this,1000);}};
@@ -29,6 +29,7 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         getWindow().setStatusBarColor(0xFF07182C);getWindow().setNavigationBarColor(0xFF07182C);
         expanded=getPreferences(0).getBoolean("expanded",false);
+        zoomExpanded=getPreferences(0).getBoolean("zoomExpanded",false);
         original=getPreferences(0).getBoolean("originalMode",false);
         fullscreen=getPreferences(0).getBoolean("fullscreenMode",false);
         web=new WebView(this);
@@ -60,6 +61,7 @@ public class MainActivity extends Activity {
         int mode=getPreferences(0).getInt("orientationMode",0);
         applyOrientation(mode);
         TimerReceiver.ensureChannel(this);
+        ReminderScheduler.list(this);
         build();
         setFullscreen(fullscreen);
         handler.post(clock);
@@ -76,11 +78,11 @@ public class MainActivity extends Activity {
     }
     private void build(){
         landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
-        slider=null;zoomLabel=null;viewLabel=null;countdown=null;
+        slider=null;zoomLabel=null;viewLabel=null;countdown=null;zoomToggle=null;timerButton=null;
         if(viewport.getParent()!=null)((android.view.ViewGroup)viewport.getParent()).removeView(viewport);
         root=new FrameLayout(this);root.setBackgroundColor(Color.BLACK);
         root.addView(viewport,new FrameLayout.LayoutParams(-1,-1));
-        viewport.setModes(landscape,original,(!landscape&&!original)?(expanded?318:52):0);
+        viewport.setModes(landscape,original,(!landscape&&!original)?(expanded?220:52):0);
         if(!original){
             panel=new LinearLayout(this);
             panel.setOrientation(LinearLayout.VERTICAL);
@@ -88,10 +90,16 @@ public class MainActivity extends Activity {
             panel.setBackgroundColor(0xEF07182C);
             FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(
                 landscape?dp(expanded?265:72):-1,
-                dp(expanded?(landscape?280:318):landscape?48:44),
+                FrameLayout.LayoutParams.WRAP_CONTENT,
                 landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM);
             p.setMargins(dp(8),0,dp(8),dp(8));
             root.addView(panel,p);
+            panel.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or_,ob)->{
+                if(!landscape&&!original && (b-t)!=(ob-ot)){
+                    float density=getResources().getDisplayMetrics().density;
+                    viewport.setReservedBottom(Math.round((b-t+dp(8))/density));
+                }
+            });
             LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
             header.addView(label(expanded?"SEAF COMPANION":"SEAF",14,true),new LinearLayout.LayoutParams(0,dp(34),1));
             header.addView(button(expanded?"−":"+",()->{
@@ -103,7 +111,8 @@ public class MainActivity extends Activity {
                 panel.addView(countdown,new LinearLayout.LayoutParams(-1,dp(37)));
                 panel.addView(label("Local timer • Game state not synchronized",11,false));
                 LinearLayout actions=new LinearLayout(this);
-                actions.addView(button("Timer",this::showTimer),new LinearLayout.LayoutParams(0,dp(37),1));
+                timerButton=button("Timers",this::showTimer);
+                actions.addView(timerButton,new LinearLayout.LayoutParams(0,dp(37),1));
                 actions.addView(button("Settings",this::showSettings),new LinearLayout.LayoutParams(0,dp(37),1));
                 panel.addView(actions);
                 if(landscape) {
@@ -115,6 +124,13 @@ public class MainActivity extends Activity {
                     panel.addView(orientation);
                 }
                 if(!landscape){
+                    zoomToggle=button("Zoom ▾",()->{
+                        zoomExpanded=!zoomExpanded;
+                        getPreferences(0).edit().putBoolean("zoomExpanded",zoomExpanded).apply();
+                        build();
+                    });
+                    panel.addView(zoomToggle,new LinearLayout.LayoutParams(-1,dp(36)));
+                    if(zoomExpanded){
                     viewLabel=label("View",12,true);
                     panel.addView(viewLabel,new LinearLayout.LayoutParams(-1,dp(20)));
                     LinearLayout presets=new LinearLayout(this);
@@ -145,6 +161,7 @@ public class MainActivity extends Activity {
                     pr.addView(button("Recenter",viewport::center),new LinearLayout.LayoutParams(0,dp(35),2));
                     pr.addView(button("→",()->viewport.pan(45,0)),new LinearLayout.LayoutParams(0,dp(35),1));
                     panel.addView(pr);
+                    }
                     LinearLayout nav=new LinearLayout(this);
                     nav.addView(button("Overview",()->{viewport.showOverview();updateZoom();}),new LinearLayout.LayoutParams(0,dp(35),1));
                     nav.addView(button("Rotate",this::toggleOrientation),new LinearLayout.LayoutParams(0,dp(35),1));
@@ -169,6 +186,8 @@ public class MainActivity extends Activity {
         if(viewport==null)return;
         float zoom=viewport.getZoom();
         if(zoomLabel!=null)zoomLabel.setText(String.format(Locale.US,"Zoom %.0f%%",zoom*100));
+        if(zoomToggle!=null)zoomToggle.setText(String.format(Locale.US,"Zoom %s  %.0f%%",
+            zoomExpanded?"▴":"▾",zoom*100));
         if(viewLabel!=null){
             String region=viewport.getFocusRegion()==GameViewport.LEFT?"Left":viewport.getFocusRegion()==GameViewport.RIGHT?"Right":"Center";
             viewLabel.setText(viewport.isHeightFit()?"Height-fit • "+region+" third":"Overview • entire game");
