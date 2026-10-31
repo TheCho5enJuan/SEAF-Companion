@@ -80,37 +80,42 @@ public final class GameViewport extends FrameLayout {
                 this.stage=e;
                 this.saved=this.save(e);
               }
-              var frame=document.getElementById('page-home')||e.parentElement;
-              var width=(frame&&frame.clientWidth)||window.innerWidth;
-              var height=(frame&&frame.clientHeight)||window.innerHeight;
+              // The game parent can be 1600px wide even on a 360px phone.
+              // Never derive visible screen bounds from #page-home.clientWidth.
+              // visualViewport gives the CSS-pixel area actually on-screen.
+              var visible=window.visualViewport;
+              var width=(visible&&visible.width)||window.innerWidth;
+              var height=(visible&&visible.height)||window.innerHeight;
+              var visibleLeft=(visible&&visible.offsetLeft)||0;
+              var visibleTop=(visible&&visible.offsetTop)||0;
               var stageW=e.offsetWidth||1600, stageH=e.offsetHeight||900;
               if(width<100||height<100||stageW<100||stageH<100)return;
-              var bottom=Math.max(0,Math.min(this.bottom,height*0.55));
+              var bottom=Math.max(0,Math.min(height*this.bottom,height*0.5));
               var usableH=Math.max(150,height-bottom);
-              // Focus mode uses the height not occupied by the companion.
-              // Overview is the only mode that tries to show all 1600x900.
-              var fitWidth=(width-4)/stageW;
-              var fitHeight=(usableH-4)/stageH;
-              // Layout-aware framing based on the two captured screens:
-              // the mission preview occupies the left portion while the
-              // mission list extends nearly to the right edge.
-              // Each focused view contains ~54% of the stage, overlapping
-              // adjacent views. Fit to the available height when shorter.
-              var focusFraction=0.54;
-              var fitHeight=Math.max(0.01,(usableH-4)/stageH);
-              var fitWidth=Math.max(0.01,(width-4)/stageW);
-              var focusFit=Math.min(fitHeight,(width-4)/(stageW*focusFraction));
-              var base=this.fit==='height'?focusFit:Math.min(fitWidth,fitHeight);
-              var factor=Math.max(0.01,base);
-              var extraX=Math.max(0,(stageW*factor-width)/2);
-              var extraY=Math.max(0,(stageH*factor-usableH)/2);
-              // The presets are edge-anchored rather than centered on
-              // mathematical thirds. This exposes the full right-side list.
-              var anchor=(1-this.region)*extraX;
-              var pan=Math.max(-extraX,Math.min(extraX,anchor+this.dx));
-              var x=width/2+pan;
-              var y=usableH/2+Math.max(-extraY,Math.min(extraY,this.dy));
-                            var key=[width,height,stageW,stageH,factor,x,y].join('|');
+              // Overview: strict contain fitting; left/center/right: overlapping
+              // 54%-width focus areas, capped by available portrait height.
+              var fitWidth=Math.max(0.01,(width-8)/stageW);
+              var fitHeight=Math.max(0.01,(usableH-8)/stageH);
+              var focusFit=Math.min(fitHeight,(width-8)/(stageW*0.54));
+              var factor=Math.max(0.01,this.fit==='height'?focusFit:
+                  Math.min(fitWidth,fitHeight));
+              var visibleContentWidth=stageW*factor;
+              var visibleContentHeight=stageH*factor;
+              var extraX=Math.max(0,(visibleContentWidth-width)/2);
+              var extraY=Math.max(0,(visibleContentHeight-usableH)/2);
+              var pan=Math.max(-extraX,Math.min(extraX,
+                  (1-this.region)*extraX+this.dx));
+              var vCenterX=visibleLeft+width/2+pan;
+              var vCenterY=visibleTop+usableH/2+
+                  Math.max(-extraY,Math.min(extraY,this.dy));
+              // Stage 'left' and 'top' are relative to the element's offset
+              // parent, not the WebView viewport. Correct for that origin.
+              var containing=e.offsetParent||document.documentElement;
+              var origin=containing.getBoundingClientRect();
+              var x=vCenterX-origin.left;
+              var y=vCenterY-origin.top;
+              var key=[width,height,visibleLeft,visibleTop,origin.left,
+                origin.top,stageW,stageH,factor,x,y,this.fit,this.region].join('|');
               // Avoid repeatedly invalidating the game renderer each second.
               if(key===this.signature &&
                  e.style.getPropertyValue('transform').indexOf('scale(')>=0) return;
@@ -194,9 +199,14 @@ public final class GameViewport extends FrameLayout {
     private void applyLayout(){
         if(web.getParent()!=this||!isGameDomain())return;
         boolean active=!landscape&&!originalMode;
+        // Relative reservation is valid whether WebView uses device-width
+        // or a 980px wide layout viewport. Never mix dp with CSS px.
+        float reservedFraction=active&&web.getHeight()>0?
+            Math.min(0.5f,reservedBottomDp*
+                getResources().getDisplayMetrics().density/web.getHeight()):0f;
         String script=String.format(Locale.US,
-            "(function(){var v=window.__seafCompanionLayout;if(v)v.set(%s,%.4f,%.2f,%.2f,%d,'%s',%d);})();",
-            active?"true":"false",zoom,offsetX,offsetY,active?reservedBottomDp:0,
+            "(function(){var v=window.__seafCompanionLayout;if(v)v.set(%s,%.4f,%.2f,%.2f,%.5f,'%s',%d);})();",
+            active?"true":"false",zoom,offsetX,offsetY,reservedFraction,
             heightFit?"height":"overview",focusRegion);
         web.evaluateJavascript(script,null);
     }
