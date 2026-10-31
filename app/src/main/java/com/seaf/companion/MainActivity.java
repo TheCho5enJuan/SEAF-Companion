@@ -91,7 +91,10 @@ public class MainActivity extends Activity {
         CompanionChrome.Icon handle=new CompanionChrome.Icon(this,"handle");
         handle.setContentDescription("Drag to move Companion");
         handle.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,false));
-        parent.addView(handle,new LinearLayout.LayoutParams(dp(30),dp(46)));
+        LinearLayout.LayoutParams handleLp=new LinearLayout.LayoutParams(dp(58),dp(22));
+        handleLp.gravity=Gravity.CENTER_HORIZONTAL;
+        handleLp.setMargins(0,0,0,dp(4));
+        parent.addView(handle,handleLp);
         final float[] initial={0,0};
         final float[] translation={0,0};
         handle.setOnTouchListener((v,e)->{
@@ -169,50 +172,64 @@ public class MainActivity extends Activity {
                 }
             });
             LinearLayout bar=new LinearLayout(this);
-            bar.setGravity(Gravity.CENTER_VERTICAL);
+            bar.setOrientation(LinearLayout.VERTICAL);
             if(!landscape){
+                // A dedicated floating grip keeps every action icon distinct
+                // and prevents accidental dragging during regular taps.
+                installDragHandle(bar);
+                LinearLayout views=new LinearLayout(this);
+                views.setGravity(Gravity.CENTER_VERTICAL);
                 String[] kinds={"left","center","right","overview"};
                 String[] names={"Left view","Center view","Right view","Full overview"};
                 for(int i=0;i<4;i++){
                     final int selection=i;
                     CompanionChrome.Icon icon=iconButton(kinds[i],names[i],()->selectView(selection));
-                    addIcon(bar,icon,1);
+                    addIcon(views,icon,1);
                     viewButtons[i]=icon;
                 }
-                View divider=new View(this);divider.setBackgroundColor(0x6682C7E8);
-                LinearLayout.LayoutParams dl=new LinearLayout.LayoutParams(dp(1),dp(29));
-                dl.setMargins(dp(4),0,dp(4),0);bar.addView(divider,dl);
+                bar.addView(views,new LinearLayout.LayoutParams(-1,dp(48)));
+                View divider=new View(this);
+                divider.setBackgroundColor(0x8896C8E6);
+                LinearLayout.LayoutParams dividerLp=new LinearLayout.LayoutParams(-1,dp(1));
+                dividerLp.setMargins(dp(14),dp(5),dp(14),dp(5));
+                bar.addView(divider,dividerLp);
+                LinearLayout tools=new LinearLayout(this);
+                tools.setGravity(Gravity.CENTER_VERTICAL);
                 FrameLayout bell=new FrameLayout(this);
                 CompanionChrome.Icon bellIcon=iconButton("bell","Mission reminder",this::showTimer);
                 bell.addView(bellIcon,new FrameLayout.LayoutParams(-1,-1));
-                bellBadge=label("",10,true);bellBadge.setTextColor(Color.BLACK);
-                bellBadge.setGravity(Gravity.CENTER);bellBadge.setBackgroundColor(CompanionChrome.GOLD);
-                FrameLayout.LayoutParams badgeParams=new FrameLayout.LayoutParams(dp(17),dp(17),Gravity.RIGHT|Gravity.TOP);
-                bell.addView(bellBadge,badgeParams);
-                LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,dp(46),1);
-                bp.setMargins(dp(2),0,dp(2),0);bar.addView(bell,bp);
-                addIcon(bar,iconButton("settings","Settings",this::showSettings),1);
-                addIcon(bar,iconButton("rotate","Rotate screen",this::toggleOrientation),1);
-                View separator=new View(this);separator.setBackgroundColor(0x6682C7E8);
-                LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(dp(1),dp(29));
-                sp.setMargins(dp(2),0,dp(2),0);bar.addView(separator,sp);
-                addIcon(bar,iconButton(expanded?"collapse":"expand",
+                bellBadge=label("",10,true);
+                bellBadge.setTextColor(Color.BLACK);
+                bellBadge.setGravity(Gravity.CENTER);
+                bellBadge.setBackgroundColor(CompanionChrome.GOLD);
+                FrameLayout.LayoutParams badge=new FrameLayout.LayoutParams(dp(17),dp(17),Gravity.RIGHT|Gravity.TOP);
+                bell.addView(bellBadge,badge);
+                LinearLayout.LayoutParams bellLp=new LinearLayout.LayoutParams(0,dp(46),1);
+                bellLp.setMargins(dp(3),0,dp(3),0);
+                tools.addView(bell,bellLp);
+                addIcon(tools,iconButton("settings","Settings",this::showSettings),1);
+                addIcon(tools,iconButton("rotate","Rotate screen",this::toggleOrientation),1);
+                addIcon(tools,iconButton(expanded?"collapse":"expand",
                     expanded?"Collapse Companion":"Expand Companion",()->{
                         expanded=!expanded;
-                        getPreferences(0).edit().putBoolean("expanded",expanded).apply();build();
+                        getPreferences(0).edit().putBoolean("expanded",expanded).apply();
+                        build();
                     }),1);
-                installDragHandle(bar);
+                bar.addView(tools,new LinearLayout.LayoutParams(-1,dp(48)));
             }else{
+                LinearLayout landscapeBar=new LinearLayout(this);
+                landscapeBar.setGravity(Gravity.CENTER_VERTICAL);
                 if(expanded){
                     TextView name=label("SEAF",12,true);
-                    bar.addView(name,new LinearLayout.LayoutParams(0,dp(46),0.65f));
+                    landscapeBar.addView(name,new LinearLayout.LayoutParams(0,dp(46),0.65f));
                 }
-                addIcon(bar,iconButton("rotate","Switch to portrait",()->applyOrientation(1)),1);
-                addIcon(bar,iconButton("settings","Settings",this::showSettings),1);
-                addIcon(bar,iconButton(expanded?"collapse":"expand",
+                addIcon(landscapeBar,iconButton("rotate","Switch to portrait",()->applyOrientation(1)),1);
+                addIcon(landscapeBar,iconButton("settings","Settings",this::showSettings),1);
+                addIcon(landscapeBar,iconButton(expanded?"collapse":"expand",
                     expanded?"Collapse":"Expand",()->{
                         expanded=!expanded;getPreferences(0).edit().putBoolean("expanded",expanded).apply();build();
                     }),1);
+                bar.addView(landscapeBar,new LinearLayout.LayoutParams(-1,dp(48)));
             }
             panel.addView(bar);
             if(expanded){
