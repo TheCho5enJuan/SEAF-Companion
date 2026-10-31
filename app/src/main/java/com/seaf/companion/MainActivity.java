@@ -251,7 +251,7 @@ public class MainActivity extends Activity {
         type.check(mission.getId());
         body.addView(type);
         final AlertDialog[] current={null};
-        int[][] durations={{5,10,15},{30,60}};
+        int[][] durations={{5,15},{30,60}};
         for(int[] group:durations){
             LinearLayout row=new LinearLayout(this);
             row.setPadding(0,dp(3),0,dp(3));
