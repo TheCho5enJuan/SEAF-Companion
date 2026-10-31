@@ -18,13 +18,6 @@ public class MainActivity extends Activity {
     private FrameLayout base;
     private LinearLayout pane;
     private TextView countdown;
-    private FrameLayout zoomPanel;
-    private float portraitZoom = 1f;
-    private float offsetX = 0f, offsetY = 0f;
-    private float lastTouchX, lastTouchY;
-    private boolean dragging = false;
-    private boolean zoomControlsShown = false;
-    private GestureDetector doubleTapDetector;
     private final Handler tick = new Handler(Looper.getMainLooper());
     private boolean expanded;
     private boolean landscape;
@@ -44,42 +37,7 @@ public class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web,true);
         web.setWebChromeClient(new WebChromeClient());
-        portraitZoom=getPreferences(0).getFloat("portraitZoom",0f);
-        doubleTapDetector=new GestureDetector(this,new GestureDetector.SimpleOnGestureListener(){
-            @Override public boolean onDown(MotionEvent e){return true;}
-            @Override public boolean onDoubleTap(MotionEvent e){
-                if(!landscape){
-                    portraitZoom=portraitZoom>1.1f?1.0f:fillZoom();
-                    offsetX=offsetY=0;
-                    setPortraitZoom(portraitZoom);
-                    syncZoomSlider();
-                    return true;
-                }
-                return false;
-            }
-        });
-        web.setOnTouchListener((v,event)->{
-            if(landscape)return false;
-            if(event.getPointerCount()>1)return false;
-            doubleTapDetector.onTouchEvent(event);
-            if(event.getActionMasked()==MotionEvent.ACTION_DOWN){
-                lastTouchX=event.getX();lastTouchY=event.getY();dragging=false;
-                return false;
-            }
-            if(event.getActionMasked()==MotionEvent.ACTION_MOVE && portraitZoom>1.01f){
-                float dx=event.getX()-lastTouchX,dy=event.getY()-lastTouchY;
-                if(Math.abs(dx)+Math.abs(dy)>2){
-                    dragging=true;offsetX+=dx;offsetY+=dy;clampOffset();
-                    web.setTranslationX(offsetX);web.setTranslationY(offsetY);
-                }
-                lastTouchX=event.getX();lastTouchY=event.getY();
-                return dragging;
-            }
-            if(event.getActionMasked()==MotionEvent.ACTION_UP && dragging){
-                dragging=false;return true;
-            }
-            return false;
-        });
+        web.setInitialScale(0);
         web.setWebViewClient(new WebViewClient(){
             @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){
                 String scheme=r.getUrl().getScheme();
@@ -110,10 +68,10 @@ public class MainActivity extends Activity {
         if(web.getParent()!=null)((android.view.ViewGroup)web.getParent()).removeView(web);
         base=new FrameLayout(this);base.setBackgroundColor(Color.BLACK);
         base.addView(web,new FrameLayout.LayoutParams(-1,-1));
-        zoomPanel=null;
-        zoomSlider=null;
-        if(!landscape) addZoomControl();
-        base.post(()->setPortraitZoom(landscape?1f:(portraitZoom<=0?fillZoom():portraitZoom)));
+        // The WebView must stay untransformed. Native view scaling crops the
+        // hardcoded 16:9 game rather than changing its layout/scroll bounds.
+        web.setScaleX(1f);web.setScaleY(1f);
+        web.setTranslationX(0f);web.setTranslationY(0f);
         pane=new LinearLayout(this);pane.setOrientation(LinearLayout.VERTICAL);
         pane.setPadding(dp(10),dp(8),dp(10),dp(8));pane.setBackgroundColor(0xF007182C);
         FrameLayout.LayoutParams pos=new FrameLayout.LayoutParams(
@@ -141,68 +99,22 @@ public class MainActivity extends Activity {
                 p.setMargins(dp(2),0,dp(2),0);actions.addView(v,p);
             }
             pane.addView(actions);
+            if(!landscape) {
+                LinearLayout zoom=new LinearLayout(this);
+                zoom.setPadding(0,dp(8),0,0);
+                zoom.addView(control("−",()->web.zoomOut()),new LinearLayout.LayoutParams(0,dp(42),1));
+                zoom.addView(control("Overview",this::resetOverview),new LinearLayout.LayoutParams(0,dp(42),2));
+                zoom.addView(control("+",()->web.zoomIn()),new LinearLayout.LayoutParams(0,dp(42),1));
+                pane.addView(zoom);
+            }
         }
         setContentView(base);updateTimer();
     }
-    private SeekBar zoomSlider;
-    private float fillZoom(){
-        if(web==null||web.getWidth()<1||web.getHeight()<1)return 3.2f;
-        // The SEAF scene is a centered 16:9 strip inside a tall viewport.
-        float bandHeight=web.getWidth()*9f/16f;
-        return Math.max(1f,Math.min(5f,web.getHeight()/bandHeight));
-    }
-    private void clampOffset(){
-        float maxX=web.getWidth()*Math.max(0,portraitZoom-1f)/2f;
-        float maxY=web.getHeight()*Math.max(0,portraitZoom-1f)/2f;
-        offsetX=Math.max(-maxX,Math.min(maxX,offsetX));
-        offsetY=Math.max(-maxY,Math.min(maxY,offsetY));
-    }
-    private void setPortraitZoom(float value){
-        if(web==null)return;
-        float z=landscape?1f:Math.max(1f,Math.min(5f,value));
-        if(!landscape){portraitZoom=z;getPreferences(0).edit().putFloat("portraitZoom",z).apply();}
-        web.setPivotX(web.getWidth()/2f);web.setPivotY(web.getHeight()/2f);
-        web.setScaleX(z);web.setScaleY(z);
-        if(landscape)offsetX=offsetY=0;
-        clampOffset();web.setTranslationX(offsetX);web.setTranslationY(offsetY);
-        syncZoomSlider();
-    }
-    private void syncZoomSlider(){
-        if(zoomSlider!=null)zoomSlider.setProgress(Math.round((portraitZoom-1f)*100));
-    }
-    private void addZoomControl(){
-        TextView fab=control("Zoom",()->{
-            zoomControlsShown=!zoomControlsShown;
-            zoomPanel.setVisibility(zoomControlsShown?View.VISIBLE:View.GONE);
-        });
-        FrameLayout.LayoutParams fabPos=new FrameLayout.LayoutParams(dp(68),dp(38),Gravity.TOP|Gravity.RIGHT);
-        fabPos.setMargins(0,dp(8),dp(12),0);
-        base.addView(fab,fabPos);
-        zoomPanel=new FrameLayout(this);
-        zoomPanel.setBackgroundColor(0xF007182C);
-        FrameLayout.LayoutParams zPos=new FrameLayout.LayoutParams(-1,dp(54),Gravity.TOP);
-        zPos.setMargins(dp(12),dp(54),dp(12),0);
-        LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);
-        TextView minus=control("−",()->setPortraitZoom(portraitZoom-0.2f));
-        TextView plus=control("+",()->setPortraitZoom(portraitZoom+0.2f));
-        TextView fit=control("Fit",()->{offsetX=offsetY=0;setPortraitZoom(1f);});
-        TextView fill=control("Fill",()->{offsetX=offsetY=0;setPortraitZoom(fillZoom());});
-        zoomSlider=new SeekBar(this);zoomSlider.setMax(400);
-        zoomSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-            public void onProgressChanged(SeekBar b,int p,boolean fromUser){
-                if(fromUser)setPortraitZoom(1f+p/100f);
-            }
-            public void onStartTrackingTouch(SeekBar b){}
-            public void onStopTrackingTouch(SeekBar b){}
-        });
-        bar.addView(minus,new LinearLayout.LayoutParams(dp(38),dp(44)));
-        bar.addView(zoomSlider,new LinearLayout.LayoutParams(0,dp(44),1));
-        bar.addView(plus,new LinearLayout.LayoutParams(dp(38),dp(44)));
-        bar.addView(fit,new LinearLayout.LayoutParams(dp(48),dp(44)));
-        bar.addView(fill,new LinearLayout.LayoutParams(dp(48),dp(44)));
-        zoomPanel.addView(bar,new FrameLayout.LayoutParams(-1,-1));
-        zoomPanel.setVisibility(zoomControlsShown?View.VISIBLE:View.GONE);
-        base.addView(zoomPanel,zPos);
+    private void resetOverview(){
+        // Reload only on explicit Overview action, preserving existing cookies.
+        web.getSettings().setLoadWithOverviewMode(true);
+        web.setInitialScale(0);
+        web.reload();
     }
     private void updateTimer(){
         if(countdown==null)return;
