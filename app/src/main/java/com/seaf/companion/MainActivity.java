@@ -110,6 +110,9 @@ public class MainActivity extends Activity {
                 case MotionEvent.ACTION_CANCEL:
                     getPreferences(0).edit().putFloat("portraitBarOffsetDp",
                         panel.getTranslationY()/getResources().getDisplayMetrics().density).apply();
+                    viewport.setReservedBottom(Math.abs(panel.getTranslationY())<dp(24)?
+                        Math.round((panel.getHeight()+dp(16))/
+                            getResources().getDisplayMetrics().density):0);
                     return true;
             }
             return false;
@@ -295,79 +298,166 @@ public class MainActivity extends Activity {
         Toast.makeText(this,category+" reminder set for "+minutes+" minutes",Toast.LENGTH_SHORT).show();
         if(dialog!=null)dialog.dismiss();
     }
+    private TextView reminderAction(String name,boolean primary,boolean danger,Runnable click){
+        TextView t=label(name,14,true);
+        t.setGravity(Gravity.CENTER);
+        t.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,primary));
+        if(danger){
+            android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                new int[]{0xCC65294C,0xD8422440});
+            bg.setCornerRadius(dp(14));bg.setStroke(dp(1),0xAAE58BAC);
+            t.setBackground(bg);
+            t.setTextColor(0xFFFFA7B7);
+        }
+        t.setOnClickListener(v->click.run());
+        return t;
+    }
     private void showTimer(){
-        ScrollView scroll=new ScrollView(this);
+        final java.util.ArrayList<ReminderScheduler.Reminder> current=ReminderScheduler.list(this);
+        final ReminderScheduler.Reminder active=current.isEmpty()?null:current.get(0);
+        final AlertDialog dialog=new AlertDialog.Builder(this).create();
         LinearLayout body=new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(dp(18),dp(10),dp(18),dp(6));
+        body.setPadding(dp(18),dp(14),dp(18),dp(17));
+        body.setBackground(CompanionChrome.panel(getResources().getDisplayMetrics().density));
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
         scroll.addView(body);
-        body.addView(dialogLabel("Quick reminders (manual, not synced to SEAF)",13));
-        RadioGroup type=new RadioGroup(this);
-        type.setOrientation(RadioGroup.HORIZONTAL);
-        RadioButton mission=new RadioButton(this);mission.setText("Mission");
-        mission.setTextColor(0xFF25354A);mission.setId(View.generateViewId());
-        RadioButton care=new RadioButton(this);care.setText("Care / Minigame");
-        care.setTextColor(0xFF25354A);care.setId(View.generateViewId());
-        type.addView(mission);type.addView(care);
-        type.check(mission.getId());
-        body.addView(type);
-        final AlertDialog[] current={null};
-        int[][] durations={{5,15},{30,60}};
-        for(int[] group:durations){
-            LinearLayout row=new LinearLayout(this);
-            row.setPadding(0,dp(3),0,dp(3));
-            for(int minutes:group){
-                TextView quick=button(minutes+" min",()->startQuickTimer(
-                    care.isChecked()?"Care":"Mission",minutes,current[0]));
-                LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(42),1);
-                p.setMargins(dp(2),0,dp(2),0);
-                row.addView(quick,p);
-            }
-            body.addView(row);
+        TextView title=label("MISSION REMINDER",17,true);
+        title.setTextColor(CompanionChrome.WHITE);
+        body.addView(title);
+        TextView detail=label("One manual timer  •  Not synced to SEAF",12,false);
+        detail.setTextColor(CompanionChrome.WHITE);
+        LinearLayout.LayoutParams infoLp=new LinearLayout.LayoutParams(-1,dp(29));
+        body.addView(detail,infoLp);
+        final TextView clock=label(active==null?"No timer running":"",29,true);
+        clock.setGravity(Gravity.CENTER);
+        clock.setTextColor(CompanionChrome.WHITE);
+        body.addView(clock,new LinearLayout.LayoutParams(-1,dp(60)));
+        if(active!=null){
+            long remaining=Math.max(0,active.due-System.currentTimeMillis())/1000;
+            clock.setText(String.format(Locale.US,"%02d:%02d:%02d remaining",
+                remaining/3600,remaining/60%60,remaining%60));
         }
-        LinearLayout custom=new LinearLayout(this);
-        custom.setGravity(Gravity.CENTER_VERTICAL);
-        EditText minutes=new EditText(this);
-        minutes.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        minutes.setSingleLine(true);
-        minutes.setHint("Custom minutes");
-        minutes.setTextColor(0xFF25354A);
-        custom.addView(minutes,new LinearLayout.LayoutParams(0,dp(54),1));
-        TextView add=button("Start",()->{
-            int value=0;
-            try{value=Integer.parseInt(minutes.getText().toString().trim());}
-            catch(NumberFormatException ignored){}
-            startQuickTimer(care.isChecked()?"Care":"Mission",value,current[0]);
-        });
-        custom.addView(add,new LinearLayout.LayoutParams(dp(86),dp(42)));
-        body.addView(custom);
-        body.addView(dialogLabel("Current reminder (selecting a preset replaces it)",17));
-        java.util.ArrayList<ReminderScheduler.Reminder> active=ReminderScheduler.list(this);
-        if(active.isEmpty())body.addView(dialogLabel("None yet",13));
-        for(ReminderScheduler.Reminder r:active){
-            LinearLayout row=new LinearLayout(this);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            long remaining=Math.max(0,r.due-System.currentTimeMillis())/1000;
-            String duration=String.format(Locale.US,"%dh %02dm",remaining/3600,(remaining/60)%60);
-            TextView name=dialogLabel(r.label+"   ·   "+duration+" left",13);
-            row.addView(name,new LinearLayout.LayoutParams(0,dp(46),1));
-            TextView cancel=button("Cancel",()->{
-                ReminderScheduler.cancel(this,r.id);
-                updateTimer();
-                if(current[0]!=null)current[0].dismiss();
-                showTimer();
+        View separator=new View(this);
+        separator.setBackgroundColor(0x7089B9DE);
+        LinearLayout.LayoutParams split=new LinearLayout.LayoutParams(-1,dp(1));
+        split.setMargins(0,dp(9),0,dp(15));body.addView(separator,split);
+        TextView select=label("Choose a duration",13,true);
+        select.setTextColor(CompanionChrome.WHITE);
+        body.addView(select,new LinearLayout.LayoutParams(-1,dp(29)));
+
+        final int[] chosen={0};
+        final TextView[] presets=new TextView[4];
+        final EditText custom=new EditText(this);
+        final int[] values={5,15,30,60};
+        LinearLayout options=new LinearLayout(this);
+        for(int i=0;i<4;i++){
+            final int which=i;
+            TextView button=label(new String[]{"5m","15m","30m","1h"}[i],15,true);
+            button.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(49),1);
+            lp.setMargins(dp(2),0,dp(2),0);
+            options.addView(button,lp);
+            presets[i]=button;
+            button.setOnClickListener(v->{
+                chosen[0]=values[which];
+                for(int j=0;j<4;j++)
+                    presets[j].setBackground(CompanionChrome.glass(
+                        getResources().getDisplayMetrics().density,j==which));
+                custom.setText("");
             });
-            row.addView(cancel,new LinearLayout.LayoutParams(dp(84),dp(38)));
-            body.addView(row);
         }
-        body.addView(dialogLabel("Android may delay alerts when exact alarms are restricted. "+
-            "You can change the alert sound in Companion Settings.",12));
-        current[0]=new AlertDialog.Builder(this)
-            .setTitle("SEAF Reminder")
-            .setView(scroll)
-            .setNegativeButton("Close",null)
-            .create();
-        current[0].show();
+        body.addView(options);
+        custom.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        custom.setSingleLine(true);
+        custom.setTextColor(CompanionChrome.WHITE);
+        custom.setHintTextColor(0xFF8BA8C9);
+        custom.setHint("Or enter custom minutes");
+        custom.setTextSize(14);
+        custom.setPadding(dp(12),dp(5),dp(12),dp(5));
+        custom.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,false));
+        LinearLayout.LayoutParams customLp=new LinearLayout.LayoutParams(-1,dp(49));
+        customLp.setMargins(0,dp(12),0,dp(17));
+        body.addView(custom,customLp);
+        custom.addTextChangedListener(new android.text.TextWatcher(){
+            public void beforeTextChanged(CharSequence s,int start,int count,int after){}
+            public void onTextChanged(CharSequence s,int start,int before,int count){
+                if(s.length()>0){
+                    chosen[0]=0;
+                    for(TextView b:presets)
+                        b.setBackground(CompanionChrome.glass(
+                            getResources().getDisplayMetrics().density,false));
+                }
+            }
+            public void afterTextChanged(android.text.Editable e){}
+        });
+        // Default highlighted preset is 15 minutes, matching the mockup.
+        chosen[0]=15;
+        for(int j=0;j<4;j++)
+            presets[j].setBackground(CompanionChrome.glass(
+                getResources().getDisplayMetrics().density,j==1));
+
+        LinearLayout actions=new LinearLayout(this);
+        if(active!=null){
+            TextView delete=reminderAction("Delete",false,true,()->{
+                ReminderScheduler.cancel(this);
+                updateTimer();
+                dialog.dismiss();
+                Toast.makeText(this,"Reminder deleted",Toast.LENGTH_SHORT).show();
+            });
+            LinearLayout.LayoutParams del=new LinearLayout.LayoutParams(0,dp(48),1);
+            del.setMargins(0,0,dp(5),0);actions.addView(delete,del);
+        }
+        TextView set=reminderAction(active==null?"Set Reminder":"Update Reminder",
+            true,false,()->{
+                int minutes=chosen[0];
+                if(custom.getText().length()>0){
+                    try{minutes=Integer.parseInt(custom.getText().toString());}
+                    catch(NumberFormatException ignored){minutes=0;}
+                }
+                if(minutes<1||minutes>10080){
+                    custom.setError("Enter 1 to 10080 minutes");
+                    return;
+                }
+                ReminderScheduler.Reminder next=ReminderScheduler.schedule(this,
+                    System.currentTimeMillis()+minutes*60000L,"Mission ("+minutes+"m)");
+                if(next==null){
+                    Toast.makeText(this,"Unable to set reminder",Toast.LENGTH_LONG).show();
+                    return;
+                }
+                if(Build.VERSION.SDK_INT>=33 &&
+                   checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=
+                       android.content.pm.PackageManager.PERMISSION_GRANTED)
+                    requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},7);
+                updateTimer();
+                dialog.dismiss();
+                Toast.makeText(this,"Mission reminder "+(active==null?"set":"updated"),
+                    Toast.LENGTH_SHORT).show();
+            });
+        actions.addView(set,new LinearLayout.LayoutParams(0,dp(48),1.2f));
+        body.addView(actions);
+        TextView close=label("Close",12,false);
+        close.setGravity(Gravity.CENTER);
+        close.setTextColor(CompanionChrome.WHITE);
+        close.setOnClickListener(v->dialog.dismiss());
+        LinearLayout.LayoutParams closeLp=new LinearLayout.LayoutParams(-1,dp(34));
+        closeLp.setMargins(0,dp(10),0,0);
+        body.addView(close,closeLp);
+        dialog.setView(scroll);
+        dialog.setOnShowListener(d->{
+            android.view.Window window=dialog.getWindow();
+            if(window!=null){
+                window.setBackgroundDrawableResource(android.R.color.transparent);
+                window.setLayout(Math.min(getResources().getDisplayMetrics().widthPixels-dp(24),
+                    dp(450)),-2);
+                window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                WindowManager.LayoutParams attrs=window.getAttributes();
+                attrs.dimAmount=.58f;window.setAttributes(attrs);
+            }
+        });
+        dialog.show();
     }
     private void showSettings(){
         String[] opts={"Original game mode","Auto rotate","Lock portrait","Lock landscape",
