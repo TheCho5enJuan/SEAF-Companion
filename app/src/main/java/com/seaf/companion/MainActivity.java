@@ -20,8 +20,18 @@ public class MainActivity extends Activity {
     private LinearLayout panel;
     private ImageView ambientView;
     private boolean ambientEnabled;
+    // The blurred backdrop is an adaptive live mirror, not a 12-second screenshot.
+    // Target roughly 15 fps, backing off if WebView capture slows the UI thread.
+    private boolean ambientForeground=false;
+    private android.graphics.Bitmap[] ambientBuffers=new android.graphics.Bitmap[2];
+    private int ambientBufferIndex=0;
     private final Runnable ambientTick=new Runnable(){public void run(){
-        updateAmbient();if(ambientEnabled)handler.postDelayed(this,12000);
+        if(!ambientEnabled||!ambientForeground||isFinishing())return;
+        long started=android.os.SystemClock.uptimeMillis();
+        updateAmbient();
+        long cost=android.os.SystemClock.uptimeMillis()-started;
+        long target=cost>35?200:cost>18?120:66;
+        handler.postDelayed(this,Math.max(16,target-cost));
     }};
     private TextView countdown, timerButton, bellBadge;
     private final CompanionChrome.Icon[] viewButtons=new CompanionChrome.Icon[4];
@@ -71,7 +81,6 @@ public class MainActivity extends Activity {
         build();
         setFullscreen(fullscreen);
         handler.post(clock);
-        if(ambientEnabled)handler.postDelayed(ambientTick,3500);
         web.loadUrl("https://seaf.se/");
     }
     private TextView label(String text,int size,boolean bold){
@@ -274,7 +283,6 @@ public class MainActivity extends Activity {
             p.setMargins(0,0,dp(12),dp(20));root.addView(restore,p);
         }
         setContentView(root);
-        if(ambientEnabled)handler.postDelayed(ambientTick,900);
         if(!original)root.post(this::updatePanelPosition);
         updateViewButtons();updateTimer();
     }
@@ -537,18 +545,39 @@ public class MainActivity extends Activity {
             "document.head.appendChild(s);}})();":
             "(function(){var s=document.getElementById('seaf-ambient-transparent');"+
             "if(s)s.remove();})()",null);
-        if(ambientEnabled)handler.postDelayed(ambientTick,1500);
+        if(ambientEnabled&&ambientForeground)handler.post(ambientTick);
     }
     private void updateAmbient(){
-        if(!ambientEnabled||web==null||ambientView==null||web.getWidth()<1)return;
+        if(!ambientEnabled||!ambientForeground||web==null||ambientView==null||
+           ambientView.getVisibility()!=View.VISIBLE||web.getWidth()<1||web.getHeight()<1)return;
         try{
-            int w=280,h=Math.max(140,Math.round((float)web.getHeight()/web.getWidth()*w));
-            android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(
-                w,h,android.graphics.Bitmap.Config.RGB_565);
-            android.graphics.Canvas capture=new android.graphics.Canvas(bitmap);
-            capture.scale((float)w/web.getWidth(),(float)h/web.getHeight());
+            // Sample the visible game area, not the black letterbox surrounding it.
+            // A small reusable buffer is expanded and blurred by the GPU.
+            final int width=256;
+            final int height=144;
+            android.graphics.Bitmap target=ambientBuffers[ambientBufferIndex];
+            if(target==null||target.getWidth()!=width||target.getHeight()!=height){
+                target=android.graphics.Bitmap.createBitmap(
+                    width,height,android.graphics.Bitmap.Config.RGB_565);
+                ambientBuffers[ambientBufferIndex]=target;
+            }
+            float sourceWidth=web.getWidth();
+            float sourceHeight=Math.min(web.getHeight(),sourceWidth*height/width);
+            float centerY=web.getHeight()/2f;
+            if(!landscape&&panel!=null&&Math.abs(panel.getTranslationY())<dp(24)){
+                centerY=(web.getHeight()-panel.getHeight())/2f;
+            }
+            float top=Math.max(0,Math.min(web.getHeight()-sourceHeight,
+                centerY-sourceHeight/2f));
+            android.graphics.Canvas capture=new android.graphics.Canvas(target);
+            capture.drawColor(Color.BLACK);
+            capture.scale(width/sourceWidth,height/sourceHeight);
+            capture.translate(0,-top);
             web.draw(capture);
-            ambientView.setImageBitmap(bitmap);
+            ambientView.setImageBitmap(target);
+            // Alternate textures so the render thread is not displaying the
+            // same bitmap as the UI thread is updating.
+            ambientBufferIndex=1-ambientBufferIndex;
         }catch(Exception ignored){}
     }
     private void showSettings(){
@@ -556,7 +585,7 @@ public class MainActivity extends Activity {
             "Toggle fullscreen","Remember zoom: "+(getPreferences(0).getBoolean("rememberZoom",true)?"On":"Off"),
             "Auto center: "+(getPreferences(0).getBoolean("autoCenter",true)?"On":"Off"),
             "Mission notification sound","Android battery settings","Refresh game","Open game in browser",
-            "Ambient blurred background: "+(ambientEnabled?"On":"Off")};
+            "Live ambient blur: "+(ambientEnabled?"On":"Off")};
         new AlertDialog.Builder(this).setTitle("SEAF Companion Settings")
           .setItems(opts,(d,which)->{
               switch(which){
@@ -611,6 +640,16 @@ public class MainActivity extends Activity {
     }
     @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);build();}
     @Override public void onBackPressed(){if(web.canGoBack())web.goBack();else if(original)setOriginal(false);else super.onBackPressed();}
-    @Override protected void onPause(){CookieManager.getInstance().flush();super.onPause();}
+    @Override protected void onResume(){
+        super.onResume();
+        ambientForeground=true;
+        if(ambientEnabled)handler.post(this::applyAmbient);
+    }
+    @Override protected void onPause(){
+        ambientForeground=false;
+        handler.removeCallbacks(ambientTick);
+        CookieManager.getInstance().flush();
+        super.onPause();
+    }
     @Override protected void onDestroy(){handler.removeCallbacks(clock);handler.removeCallbacks(ambientTick);web.destroy();super.onDestroy();}
 }
