@@ -129,6 +129,7 @@ public class MainActivity extends Activity {
         web.setPivotX(web.getWidth()/2f);
         web.setPivotY(web.getHeight()/2f);
         web.setScaleX(z);web.setScaleY(z);
+        syncZoomSlider();
         web.post(()->{
             web.setPivotX(web.getWidth()/2f);web.setPivotY(web.getHeight()/2f);
         });
