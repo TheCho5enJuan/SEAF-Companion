@@ -49,16 +49,16 @@ public final class ReminderScheduler {
         }
         prefs(c).edit().putString("items",a.toString()).apply();
     }
-    private static PendingIntent pending(Context c,int id,String label){
+    private static PendingIntent pending(Context c,int id,String label,long due){
         Intent i=new Intent(c,TimerReceiver.class);
-        i.putExtra("id",id).putExtra("label",label);
+        i.putExtra("id",id).putExtra("label",label).putExtra("due",due);
         return PendingIntent.getBroadcast(c,id,i,
             PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
     }
     private static void arm(Context c,Reminder r){
         AlarmManager a=(AlarmManager)c.getSystemService(Context.ALARM_SERVICE);
         if(a==null)return;
-        PendingIntent p=pending(c,r.id,r.label);
+        PendingIntent p=pending(c,r.id,r.label,r.due);
         // Exact alarms are only available when Android permits them.
         if(Build.VERSION.SDK_INT<31||a.canScheduleExactAlarms()){
             a.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,r.due,p);
