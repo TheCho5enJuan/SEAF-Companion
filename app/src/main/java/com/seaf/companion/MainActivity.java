@@ -269,6 +269,57 @@ public class MainActivity extends Activity {
         updateHudReservation();
         if(autoHidden)locateBadge();
     }
+    private static final String SUSPEND_GAME_AUDIO = """
+        (function(){
+          try{
+            document.querySelectorAll('audio,video').forEach(function(m){
+              try{m.pause();}catch(e){}
+            });
+            if(window.Howler && typeof window.Howler.mute==='function')
+              window.Howler.mute(true);
+            if(window.createjs && createjs.Sound && createjs.Sound.muted!==undefined)
+              createjs.Sound.muted=true;
+            if(window.__seafCompanionAudioContexts)
+              window.__seafCompanionAudioContexts.forEach(function(ctx){
+                if(ctx.state==='running')ctx.suspend().catch(function(){});
+              });
+          }catch(e){}
+        })();
+        """;
+    private static final String RESUME_GAME_AUDIO = """
+        (function(){
+          try{
+            if(window.Howler && typeof window.Howler.mute==='function')
+              window.Howler.mute(false);
+            if(window.createjs && createjs.Sound && createjs.Sound.muted!==undefined)
+              createjs.Sound.muted=false;
+            if(window.__seafCompanionAudioContexts)
+              window.__seafCompanionAudioContexts.forEach(function(ctx){
+                if(ctx.state==='suspended')ctx.resume().catch(function(){});
+              });
+          }catch(e){}
+        })();
+        """;
+    private void pauseGameAudio(){
+        if(web==null)return;
+        try{web.evaluateJavascript(SUSPEND_GAME_AUDIO,null);}catch(Exception ignored){}
+        try{web.onPause();}catch(Exception ignored){}
+        try{web.pauseTimers();}catch(Exception ignored){}
+    }
+    private void resumeGameAudio(){
+        if(web==null||isFinishing())return;
+        try{web.onResume();web.resumeTimers();}catch(Exception ignored){}
+        try{web.evaluateJavascript(RESUME_GAME_AUDIO,null);}catch(Exception ignored){}
+    }
+    private void closeCompanion(){
+        handler.removeCallbacks(ambientTick);
+        handler.removeCallbacks(autoHideTask);
+        handler.removeCallbacks(clock);
+        pauseGameAudio();
+        try{web.stopLoading();web.loadUrl("about:blank");}catch(Exception ignored){}
+        try{CookieManager.getInstance().flush();}catch(Exception ignored){}
+        finishAndRemoveTask();
+    }
     private void build(){
         handler.removeCallbacks(autoHideTask);
         autoHidden=false;
@@ -339,6 +390,9 @@ public class MainActivity extends Activity {
                             .putBoolean("expanded",expanded).apply();build();
                     });
                 makeDraggable(exp);addIcon(bar,exp,1);
+                CompanionChrome.Icon close=iconButton("close","Close SEAF Companion",
+                    this::closeCompanion);
+                makeDraggable(close);addIcon(bar,close,0.9f);
             }else{
                 CompanionChrome.Icon expand=iconButton(expanded?"collapse":"expand",
                     expanded?"Collapse":"Expand",()->{
@@ -346,6 +400,9 @@ public class MainActivity extends Activity {
                             .putBoolean("expanded",expanded).apply();build();
                     });
                 makeDraggable(expand);addIcon(bar,expand,1);
+                CompanionChrome.Icon close=iconButton("close","Close SEAF Companion",
+                    this::closeCompanion);
+                makeDraggable(close);addIcon(bar,close,1);
             }
             panel.addView(bar);
             if(expanded){
@@ -846,16 +903,25 @@ public class MainActivity extends Activity {
     @Override public void onBackPressed(){if(web.canGoBack())web.goBack();else if(original)setOriginal(false);else super.onBackPressed();}
     @Override protected void onResume(){
         super.onResume();
+        resumeGameAudio();
         ambientForeground=true;
         if(ambientEnabled)handler.post(this::applyAmbient);
         scheduleAutoHide();
     }
     @Override protected void onPause(){
+        pauseGameAudio();
         ambientForeground=false;
         handler.removeCallbacks(ambientTick);
         handler.removeCallbacks(autoHideTask);
         CookieManager.getInstance().flush();
         super.onPause();
     }
-    @Override protected void onDestroy(){handler.removeCallbacks(clock);handler.removeCallbacks(ambientTick);handler.removeCallbacks(autoHideTask);web.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){
+        handler.removeCallbacks(clock);
+        handler.removeCallbacks(ambientTick);
+        handler.removeCallbacks(autoHideTask);
+        try{pauseGameAudio();web.stopLoading();web.loadUrl("about:blank");web.destroy();}
+        catch(Exception ignored){}
+        super.onDestroy();
+    }
 }
