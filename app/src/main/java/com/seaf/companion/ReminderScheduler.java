@@ -13,7 +13,7 @@ import java.util.Comparator;
 /** Local manual reminders only. Nothing here reads or changes SEAF game state. */
 public final class ReminderScheduler {
     private static final String STORE="seaf_reminders_v2";
-    private static final int MAX_ACTIVE=12;
+    private static final int MAX_ACTIVE=1;
     private ReminderScheduler(){}
 
     public static final class Reminder {
@@ -68,14 +68,28 @@ public final class ReminderScheduler {
     }
     public static synchronized ArrayList<Reminder> list(Context c){
         migrateLegacy(c);
-        return load(c);
+        ArrayList<Reminder> all=load(c);
+        if(all.size()>1){
+            for(int i=1;i<all.size();i++)cancelAlarm(c,all.get(i));
+            all.subList(1,all.size()).clear();save(c,all);
+        }
+        return all;
+    }
+    private static void cancelAlarm(Context c,Reminder r){
+        AlarmManager a=(AlarmManager)c.getSystemService(Context.ALARM_SERVICE);
+        if(a!=null)a.cancel(pending(c,r.id,r.label));
     }
     public static synchronized Reminder schedule(Context c,long due,String label){
         migrateLegacy(c);
-        ArrayList<Reminder> all=load(c);
-        if(due<=System.currentTimeMillis() || all.size()>=MAX_ACTIVE)return null;
-        int id=prefs(c).getInt("nextId",10010);
-        prefs(c).edit().putInt("nextId",id+1).apply();
+        ArrayList<Reminder> all=list(c);
+        if(due<=System.currentTimeMillis())return null;
+        int id;
+        if(all.isEmpty()){
+            id=prefs(c).getInt("nextId",10010);
+            prefs(c).edit().putInt("nextId",id+1).apply();
+        }else{
+            id=all.get(0).id;cancelAlarm(c,all.get(0));all.clear();
+        }
         String safe=label==null?"Mission":label.trim();
         if(safe.isEmpty())safe="Mission";
         if(safe.length()>48)safe=safe.substring(0,48);
@@ -86,7 +100,7 @@ public final class ReminderScheduler {
     /** Old one-timer API remains supported for migrations/callers. */
     public static void schedule(Context c,long due){schedule(c,due,"Mission");}
     public static synchronized void cancel(Context c,int id){
-        ArrayList<Reminder> all=load(c);
+        ArrayList<Reminder> all=list(c);
         for(Reminder r:all){
             if(r.id==id){
                 AlarmManager a=(AlarmManager)c.getSystemService(Context.ALARM_SERVICE);
@@ -99,9 +113,9 @@ public final class ReminderScheduler {
     public static synchronized void cancel(Context c){
         for(Reminder r:list(c))cancel(c,r.id);
     }
-    public static synchronized boolean finish(Context c,int id){
+    public static synchronized boolean finish(Context c,int id,long due){
         ArrayList<Reminder> all=load(c);
-        boolean found=all.removeIf(r->r.id==id);
+        boolean found=all.removeIf(r->r.id==id && r.due==due && r.due<=System.currentTimeMillis()+1000);
         if(found)save(c,all);
         return found;
     }
