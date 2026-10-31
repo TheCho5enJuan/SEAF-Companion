@@ -28,7 +28,7 @@ public class TimerReceiver extends BroadcastReceiver {
     }
     @Override public void onReceive(Context context,Intent intent) {
         int reminderId=intent==null?-1:intent.getIntExtra("id",-1);
-        if(reminderId<0 || !ReminderScheduler.finish(context,reminderId))return;
+        if(reminderId<0 || !ReminderScheduler.finish(context,reminderId,intent.getLongExtra("due",-1L)))return;
         ensureChannel(context);
         if(Build.VERSION.SDK_INT>=33 &&
            context.checkSelfPermission("android.permission.POST_NOTIFICATIONS") !=
