@@ -22,7 +22,7 @@ public final class GameViewport extends FrameLayout {
     public interface ZoomListener { void changed(float zoom); }
     private static final int DESKTOP_WIDTH_DP = 1600;
     private static final int DESKTOP_HEIGHT_DP = 900;
-    private static final float MIN_ZOOM = 0.75f, MAX_ZOOM = 3f;
+    private static final float MIN_ZOOM = 0.30f, MAX_ZOOM = 3f;
     private final WebView web;
     private final SharedPreferences preferences;
     private final ScaleGestureDetector scaleDetector;
@@ -106,20 +106,30 @@ public final class GameViewport extends FrameLayout {
     public boolean isOriginal(){return originalMode;}
     public void setModes(boolean isLandscape,boolean useOriginal,int reserveBottomDp){
         boolean changed=landscape!=isLandscape || originalMode!=useOriginal;
-        landscape=isLandscape;originalMode=useOriginal;
+        landscape=isLandscape;
+        originalMode=useOriginal;
         reservedBottom=dp(reserveBottomDp);
-        if(web.getParent()!=null)((ViewGroup)web.getParent()).removeView(web);
+
+        // Preserve the same WebView and its live game session on every rotation.
+        // Changing LayoutParams is safer than removing/readding the WebView.
+        FrameLayout.LayoutParams target;
         if(isLandscape||useOriginal){
-            web.setPivotX(0);web.setPivotY(0);
-            web.setScaleX(1);web.setScaleY(1);
-            web.setTranslationX(0);web.setTranslationY(0);
-            web.setX(0);web.setY(0);
-            addView(web,new FrameLayout.LayoutParams(-1,-1));
+            target=new FrameLayout.LayoutParams(-1,-1,Gravity.TOP|Gravity.LEFT);
+            web.setPivotX(0f);web.setPivotY(0f);
+            web.setScaleX(1f);web.setScaleY(1f);
+            web.setTranslationX(0f);web.setTranslationY(0f);
         }else{
-            FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(dp(DESKTOP_WIDTH_DP),dp(DESKTOP_HEIGHT_DP),Gravity.TOP|Gravity.LEFT);
-            addView(web,p);
+            target=new FrameLayout.LayoutParams(dp(DESKTOP_WIDTH_DP),
+                dp(DESKTOP_HEIGHT_DP),Gravity.TOP|Gravity.LEFT);
+            web.setPivotX(0f);web.setPivotY(0f);
         }
-        if(changed && autoCenter)offsetX=offsetY=0;
+        if(web.getParent()==null)addView(web,target);
+        else if(web.getParent()==this)web.setLayoutParams(target);
+        else {
+            ((ViewGroup)web.getParent()).removeView(web);
+            addView(web,target);
+        }
+        if(changed&&autoCenter)offsetX=offsetY=0;
         post(this::layoutGame);
     }
     public void setReservedBottom(int bottomDp){reservedBottom=dp(bottomDp);post(this::layoutGame);}
