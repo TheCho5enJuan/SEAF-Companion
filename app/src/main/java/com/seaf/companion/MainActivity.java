@@ -37,6 +37,18 @@ public class MainActivity extends Activity {
     private final CompanionChrome.Icon[] viewButtons=new CompanionChrome.Icon[4];
     private boolean adjustingPanel=false;
     private boolean expanded,original,fullscreen,landscape;
+    private static final String REMEMBER_HUD="rememberHudPosition";
+    private static final String EDGE_SNAP="hudEdgeSnap";
+    private static final String AUTO_HIDE="hudAutoHideSeconds";
+    private static final String HUD_OPACITY="hudOpacityPercent";
+    private View collapsedBadge;
+    private boolean autoHidden=false;
+    private float hudOpacity=1f;
+    private int dialogDepth=0;
+    private final Runnable autoHideTask=()->{
+        if(panel!=null&&!original&&!autoHidden&&dialogDepth==0&&ambientForeground)
+            setAutoHidden(true);
+    };
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final Runnable clock=new Runnable(){public void run(){updateTimer();handler.postDelayed(this,1000);}};
     private int dp(int n){return (int)(getResources().getDisplayMetrics().density*n+0.5f);}
@@ -47,6 +59,7 @@ public class MainActivity extends Activity {
         original=getPreferences(0).getBoolean("originalMode",false);
         fullscreen=getPreferences(0).getBoolean("fullscreenMode",false);
         ambientEnabled=getPreferences(0).getBoolean("ambientBlurEnabled",false);
+        hudOpacity=Math.max(.2f,Math.min(1f,getPreferences(0).getInt(HUD_OPACITY,100)/100f));
         web=new WebView(this);
         WebSettings s=web.getSettings();
         s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);
@@ -104,7 +117,7 @@ public class MainActivity extends Activity {
         lp.setMargins(dp(2),0,dp(2),0);
         bar.addView(button,lp);
     }
-    /** Long press any toolbar control to move the HUD; short taps still click. */
+    /** Long-press a control or the panel background to drag the HUD. */
     private void makeDraggable(View control) {
         final float[] start=new float[4];
         final boolean[] dragging={false};
@@ -112,49 +125,128 @@ public class MainActivity extends Activity {
         control.setOnTouchListener((v,e)->{
             switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
+                    hudInteracted();
                     start[0]=e.getRawX();start[1]=e.getRawY();
                     start[2]=panel.getTranslationX();start[3]=panel.getTranslationY();
                     dragging[0]=false;
-                    activate[0]=()->{dragging[0]=true;v.performHapticFeedback(
-                        android.view.HapticFeedbackConstants.LONG_PRESS);};
+                    activate[0]=()->{
+                        dragging[0]=true;
+                        v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+                    };
                     handler.postDelayed(activate[0],420);
                     return true;
                 case MotionEvent.ACTION_MOVE:
-                    if(!dragging[0] && Math.hypot(e.getRawX()-start[0],
+                    if(!dragging[0]&&Math.hypot(e.getRawX()-start[0],
                         e.getRawY()-start[1])>dp(12))
                         handler.removeCallbacks(activate[0]);
                     if(dragging[0]){
-                        float maxY=Math.max(0,root.getHeight()-panel.getHeight()-dp(20));
-                        float baseY=landscape?root.getHeight()/2f-panel.getHeight()/2f:
-                            root.getHeight()-panel.getHeight()-dp(10);
-                        float newY=baseY+start[3]+e.getRawY()-start[1];
-                        panel.setTranslationY(Math.max(dp(12),Math.min(root.getHeight()-panel.getHeight()-dp(12),newY))-baseY);
-                        float baseX=landscape?root.getWidth()-panel.getWidth()-dp(9):
-                            (root.getWidth()-panel.getWidth())/2f;
-                        float newX=baseX+start[2]+e.getRawX()-start[0];
-                        panel.setTranslationX(Math.max(dp(8),Math.min(root.getWidth()-panel.getWidth()-dp(8),newX))-baseX);
+                        float bx=panelBaseX(),by=panelBaseY();
+                        float x=bx+start[2]+e.getRawX()-start[0];
+                        float y=by+start[3]+e.getRawY()-start[1];
+                        panel.setTranslationX(limit(x,dp(8),
+                            root.getWidth()-panel.getWidth()-dp(8))-bx);
+                        panel.setTranslationY(limit(y,dp(12),
+                            root.getHeight()-panel.getHeight()-dp(12))-by);
                         updateHudReservation();
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
                     handler.removeCallbacks(activate[0]);
                     if(!dragging[0])v.performClick();
-                    else{
-                        String key=landscape?"landscape":"portrait";
-                        float density=getResources().getDisplayMetrics().density;
-                        getPreferences(0).edit()
-                            .putFloat(key+"BarOffsetXDp",panel.getTranslationX()/density)
-                            .putFloat(key+"BarOffsetDp",panel.getTranslationY()/density).apply();
+                    else {
+                        if(getPreferences(0).getBoolean(EDGE_SNAP,false))snapToEdge();
+                        rememberPosition();
                     }
-                    dragging[0]=false;return true;
+                    dragging[0]=false;
+                    hudInteracted();
+                    return true;
                 case MotionEvent.ACTION_CANCEL:
-                    handler.removeCallbacks(activate[0]);dragging[0]=false;return true;
+                    handler.removeCallbacks(activate[0]);
+                    dragging[0]=false;
+                    hudInteracted();
+                    return true;
             }
             return false;
         });
     }
+    private float limit(float value,float min,float max){
+        return Math.max(min,Math.min(Math.max(min,max),value));
+    }
+    private float panelBaseX(){
+        return landscape?root.getWidth()-panel.getWidth()-dp(9):
+            (root.getWidth()-panel.getWidth())/2f;
+    }
+    private float panelBaseY(){
+        return landscape?root.getHeight()/2f-panel.getHeight()/2f:
+            root.getHeight()-panel.getHeight()-dp(10);
+    }
+    private void rememberPosition(){
+        if(panel==null||!getPreferences(0).getBoolean(REMEMBER_HUD,true))return;
+        String key=landscape?"landscape":"portrait";
+        float density=getResources().getDisplayMetrics().density;
+        getPreferences(0).edit()
+            .putFloat(key+"BarOffsetXDp",panel.getTranslationX()/density)
+            .putFloat(key+"BarOffsetDp",panel.getTranslationY()/density).apply();
+    }
+    private void snapToEdge(){
+        if(panel==null||root.getWidth()<1||root.getHeight()<1)return;
+        float minX=dp(8),minY=dp(12);
+        float maxX=Math.max(minX,root.getWidth()-panel.getWidth()-dp(8));
+        float maxY=Math.max(minY,root.getHeight()-panel.getHeight()-dp(12));
+        float x=limit(panelBaseX()+panel.getTranslationX(),minX,maxX);
+        float y=limit(panelBaseY()+panel.getTranslationY(),minY,maxY);
+        float[] distance={x-minX,maxX-x,y-minY,maxY-y};
+        int nearest=0;
+        for(int i=1;i<4;i++)if(distance[i]<distance[nearest])nearest=i;
+        if(nearest==0)x=minX;
+        else if(nearest==1)x=maxX;
+        else if(nearest==2)y=minY;
+        else y=maxY;
+        panel.setTranslationX(x-panelBaseX());
+        panel.setTranslationY(y-panelBaseY());
+        updateHudReservation();
+    }
+    private void scheduleAutoHide(){
+        handler.removeCallbacks(autoHideTask);
+        if(panel==null||original||autoHidden||dialogDepth>0||!ambientForeground)return;
+        int seconds=getPreferences(0).getInt(AUTO_HIDE,0);
+        if(seconds>0)handler.postDelayed(autoHideTask,seconds*1000L);
+    }
+    private void hudInteracted(){
+        if(autoHidden)setAutoHidden(false);
+        scheduleAutoHide();
+    }
+    private void dialogOpened(){dialogDepth++;handler.removeCallbacks(autoHideTask);}
+    private void dialogClosed(){dialogDepth=Math.max(0,dialogDepth-1);scheduleAutoHide();}
+    private void setHudOpacity(float value){
+        hudOpacity=limit(value,.2f,1f);
+        if(panel!=null)panel.setAlpha(hudOpacity);
+        if(collapsedBadge!=null)collapsedBadge.setAlpha(hudOpacity);
+    }
+    private void locateBadge(){
+        if(collapsedBadge==null||panel==null||root==null||root.getWidth()<1)return;
+        collapsedBadge.setX(limit(panel.getX(),dp(8),
+            root.getWidth()-collapsedBadge.getWidth()-dp(8)));
+        collapsedBadge.setY(limit(panel.getY(),dp(12),
+            root.getHeight()-collapsedBadge.getHeight()-dp(12)));
+    }
+    private void setAutoHidden(boolean hidden){
+        if(panel==null||collapsedBadge==null||original)return;
+        autoHidden=hidden;
+        if(hidden){
+            handler.removeCallbacks(autoHideTask);
+            locateBadge();
+            panel.setVisibility(View.INVISIBLE);
+            collapsedBadge.setVisibility(View.VISIBLE);
+        }else{
+            collapsedBadge.setVisibility(View.GONE);
+            panel.setVisibility(View.VISIBLE);
+        }
+        updateHudReservation();
+    }
     private void updateHudReservation(){
         if(landscape||original||viewport==null||panel==null)return;
+        if(autoHidden){viewport.setReservedBottom(0);return;}
         boolean docked=Math.abs(panel.getTranslationY())<dp(24);
         viewport.setReservedBottom(docked?
             Math.round((panel.getHeight()+dp(16))/getResources().getDisplayMetrics().density):0);
@@ -162,19 +254,22 @@ public class MainActivity extends Activity {
     private void updatePanelPosition(){
         if(panel==null||root==null)return;
         String key=landscape?"landscape":"portrait";
-        float x=getPreferences(0).getFloat(key+"BarOffsetXDp",0);
-        float y=getPreferences(0).getFloat(key+"BarOffsetDp",0);
-        float baseX=landscape?root.getWidth()-panel.getWidth()-dp(9):
-            (root.getWidth()-panel.getWidth())/2f;
-        float baseY=landscape?root.getHeight()/2f-panel.getHeight()/2f:
-            root.getHeight()-panel.getHeight()-dp(10);
+        boolean remember=getPreferences(0).getBoolean(REMEMBER_HUD,true);
+        float x=remember?getPreferences(0).getFloat(key+"BarOffsetXDp",0):0;
+        float y=remember?getPreferences(0).getFloat(key+"BarOffsetDp",0):0;
+        float baseX=panelBaseX(),baseY=panelBaseY();
         panel.setTranslationX(Math.max(dp(8),Math.min(root.getWidth()-panel.getWidth()-dp(8),
             baseX+dp(Math.round(x))))-baseX);
         panel.setTranslationY(Math.max(dp(12),Math.min(root.getHeight()-panel.getHeight()-dp(12),
             baseY+dp(Math.round(y))))-baseY);
         updateHudReservation();
+        if(autoHidden)locateBadge();
     }
     private void build(){
+        handler.removeCallbacks(autoHideTask);
+        autoHidden=false;
+        collapsedBadge=null;
+        panel=null;
         landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
         countdown=null;timerButton=null;bellBadge=null;
         java.util.Arrays.fill(viewButtons,null);
@@ -197,6 +292,8 @@ public class MainActivity extends Activity {
             panel.setPadding(dp(6),dp(6),dp(6),dp(6));
             panel.setBackground(CompanionChrome.panel(getResources().getDisplayMetrics().density));
             panel.setElevation(dp(10));
+            panel.setAlpha(hudOpacity);
+            makeDraggable(panel);
             FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(
                 landscape?dp(expanded?255:76):Math.min(dp(375),getResources().getDisplayMetrics().widthPixels-dp(20)),
                 FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -204,9 +301,8 @@ public class MainActivity extends Activity {
             params.setMargins(dp(9),0,dp(9),dp(10));
             root.addView(panel,params);
             panel.addOnLayoutChangeListener((v,l,t,r,bottom,ol,ot,or_,ob)->{
-                if(!landscape&&!original){
+                if(!original&&(r-l!=or_-ol||bottom-t!=ob-ot))
                     root.post(this::updatePanelPosition);
-                }
             });
             LinearLayout bar=new LinearLayout(this);
             bar.setGravity(Gravity.CENTER_VERTICAL);
@@ -265,6 +361,8 @@ public class MainActivity extends Activity {
                 TextView fullscreenButton=button(fullscreen?"Exit Fullscreen":"Fullscreen",()->setFullscreen(!fullscreen));
                 fullscreenButton.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,false));
                 actions.addView(fullscreenButton,new LinearLayout.LayoutParams(0,dp(43),1));
+                makeDraggable(timerButton);
+                makeDraggable(fullscreenButton);
                 panel.addView(actions);
                 LinearLayout more=new LinearLayout(this);
                 TextView settings=button("Settings",this::showSettings);
@@ -273,9 +371,21 @@ public class MainActivity extends Activity {
                 rotate.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,false));
                 more.addView(settings,new LinearLayout.LayoutParams(0,dp(43),1));
                 more.addView(rotate,new LinearLayout.LayoutParams(0,dp(43),1));
+                makeDraggable(settings);
+                makeDraggable(rotate);
                 panel.addView(more);
             }
-
+            TextView badge=label("SEAF",12,true);
+            badge.setGravity(Gravity.CENTER);
+            badge.setBackground(CompanionChrome.panel(getResources().getDisplayMetrics().density));
+            badge.setElevation(dp(12));
+            badge.setAlpha(hudOpacity);
+            badge.setContentDescription("Restore Companion panel");
+            badge.setOnClickListener(v->hudInteracted());
+            collapsedBadge=badge;
+            root.addView(badge,new FrameLayout.LayoutParams(dp(70),dp(38),
+                Gravity.TOP|Gravity.LEFT));
+            badge.setVisibility(View.GONE);
         }else{
             TextView restore=button("Companion",()->setOriginal(false));
             restore.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,false));
@@ -285,6 +395,7 @@ public class MainActivity extends Activity {
         setContentView(root);
         if(!original)root.post(this::updatePanelPosition);
         updateViewButtons();updateTimer();
+        scheduleAutoHide();
     }
     private void selectView(int index){
         if(viewport==null||landscape||original)return;
