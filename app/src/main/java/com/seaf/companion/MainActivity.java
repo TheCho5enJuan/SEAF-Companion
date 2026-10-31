@@ -81,8 +81,8 @@ public class MainActivity extends Activity {
             panel.setPadding(dp(10),dp(7),dp(10),dp(7));
             panel.setBackgroundColor(0xEF07182C);
             FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(
-                landscape?dp(expanded?255:72):-1,
-                dp(expanded?(landscape?230:288):landscape?48:44),
+                landscape?dp(expanded?265:72):-1,
+                dp(expanded?(landscape?280:288):landscape?48:44),
                 landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM);
             p.setMargins(dp(8),0,dp(8),dp(8));
             root.addView(panel,p);
@@ -100,15 +100,23 @@ public class MainActivity extends Activity {
                 actions.addView(button("Timer",this::showTimer),new LinearLayout.LayoutParams(0,dp(37),1));
                 actions.addView(button("Settings",this::showSettings),new LinearLayout.LayoutParams(0,dp(37),1));
                 panel.addView(actions);
+                if(landscape) {
+                    LinearLayout orientation=new LinearLayout(this);
+                    orientation.addView(button("Portrait",()->applyOrientation(1)),
+                        new LinearLayout.LayoutParams(0,dp(38),1));
+                    orientation.addView(button("Rotate",this::toggleOrientation),
+                        new LinearLayout.LayoutParams(0,dp(38),1));
+                    panel.addView(orientation);
+                }
                 if(!landscape){
                     zoomLabel=label("Zoom 100%",12,true);
                     panel.addView(zoomLabel,new LinearLayout.LayoutParams(-1,dp(25)));
                     LinearLayout zr=new LinearLayout(this);
                     zr.addView(button("−",()->viewport.adjustZoom(-0.1f)),new LinearLayout.LayoutParams(dp(42),dp(38)));
-                    slider=new SeekBar(this);slider.setMax(225);
+                    slider=new SeekBar(this);slider.setMax(270);
                     slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
                         public void onProgressChanged(SeekBar b,int progress,boolean user){
-                            if(user&&!changingSlider)viewport.setZoom(.75f+progress/100f);
+                            if(user&&!changingSlider)viewport.setZoom(.30f+progress/100f);
                         }
                         public void onStartTrackingTouch(SeekBar b){}
                         public void onStopTrackingTouch(SeekBar b){}
@@ -128,6 +136,12 @@ public class MainActivity extends Activity {
                     panel.addView(nav);
                 }
             }
+            if(landscape&&!expanded){
+                TextView returnPortrait=button("↻",()->applyOrientation(1));
+                FrameLayout.LayoutParams rp=new FrameLayout.LayoutParams(dp(46),dp(46),Gravity.TOP|Gravity.RIGHT);
+                rp.setMargins(0,dp(10),dp(10),0);
+                root.addView(returnPortrait,rp);
+            }
         }else{
             TextView restore=button("Companion",()->setOriginal(false));
             FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(dp(105),dp(42),Gravity.RIGHT|Gravity.BOTTOM);
@@ -140,7 +154,7 @@ public class MainActivity extends Activity {
         float zoom=viewport.getZoom();
         if(zoomLabel!=null)zoomLabel.setText(String.format(Locale.US,"Zoom %.0f%%",zoom*100));
         if(slider!=null){
-            changingSlider=true;slider.setProgress(Math.round((zoom-.75f)*100));changingSlider=false;
+            changingSlider=true;slider.setProgress(Math.round((zoom-.30f)*100));changingSlider=false;
         }
     }
     private void updateTimer(){
@@ -204,6 +218,10 @@ public class MainActivity extends Activity {
     }
     private void toggleOrientation(){
         applyOrientation(landscape?1:2);
+        handler.postDelayed(()->{
+            boolean actualLandscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
+            if(actualLandscape!=landscape)build();
+        },450);
     }
     private void setFullscreen(boolean value){
         fullscreen=value;getPreferences(0).edit().putBoolean("fullscreenMode",value).apply();
