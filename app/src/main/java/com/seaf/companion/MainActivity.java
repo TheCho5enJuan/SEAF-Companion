@@ -15,6 +15,7 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     private WebView web;
+    private boolean landscape;
     private boolean zoomRestored = false;
     private float savedPortraitScale = 0f;
     private final Handler zoomHandler = new Handler(Looper.getMainLooper());
@@ -27,16 +28,6 @@ public class MainActivity extends Activity {
             }
         }
     };
-    private class RememberingWebView extends WebView {
-        RememberingWebView(Context context){super(context);}
-        @Override protected void onScaleChanged(float oldScale,float newScale){
-            super.onScaleChanged(oldScale,newScale);
-            if(zoomRestored && !landscape) {
-                zoomHandler.removeCallbacks(saveZoom);
-                zoomHandler.postDelayed(saveZoom,450);
-            }
-        }
-    }
     private void restoreZoom(){
         if(landscape){zoomRestored=true;return;}
         zoomHandler.removeCallbacks(saveZoom);
@@ -51,7 +42,6 @@ public class MainActivity extends Activity {
     private TextView countdown;
     private final Handler tick = new Handler(Looper.getMainLooper());
     private boolean expanded;
-    private boolean landscape;
     private final Runnable clock = new Runnable(){
         public void run(){updateTimer();tick.postDelayed(this,1000);}
     };
@@ -60,7 +50,7 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(0xFF07182C);
         getWindow().setNavigationBarColor(0xFF07182C);
         savedPortraitScale=getPreferences(0).getFloat("savedPortraitScale",0f);
-        web=new RememberingWebView(this);
+        web=new WebView(this);
         WebSettings s=web.getSettings();
         s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);
         s.setUseWideViewPort(true);s.setLoadWithOverviewMode(true);
@@ -71,6 +61,13 @@ public class MainActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient());
         web.setInitialScale(0);
         web.setWebViewClient(new WebViewClient(){
+            @Override public void onScaleChanged(WebView view,float oldScale,float newScale){
+                super.onScaleChanged(view,oldScale,newScale);
+                if(zoomRestored && !landscape) {
+                    zoomHandler.removeCallbacks(saveZoom);
+                    zoomHandler.postDelayed(saveZoom,450);
+                }
+            }
             @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap favicon){zoomRestored=false;}
             @Override public void onPageFinished(WebView v,String url){v.postDelayed(()->restoreZoom(),500);}
             @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){
