@@ -392,7 +392,7 @@ public class MainActivity extends Activity {
                 makeDraggable(exp);addIcon(bar,exp,1);
                 CompanionChrome.Icon close=iconButton("close","Close SEAF Companion",
                     this::closeCompanion);
-                makeDraggable(close);addIcon(bar,close,0.9f);
+                makeDraggable(close);addIcon(bar,close,1);
             }else{
                 CompanionChrome.Icon expand=iconButton(expanded?"collapse":"expand",
                     expanded?"Collapse":"Expand",()->{
