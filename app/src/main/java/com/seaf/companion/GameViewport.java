@@ -20,8 +20,8 @@ import android.widget.FrameLayout;
  */
 public final class GameViewport extends FrameLayout {
     public interface ZoomListener { void changed(float zoom); }
-    private static final int DESKTOP_WIDTH_DP = 960;
-    private static final int DESKTOP_HEIGHT_DP = 540;
+    private static final int DESKTOP_WIDTH_DP = 1600;
+    private static final int DESKTOP_HEIGHT_DP = 900;
     private static final float MIN_ZOOM = 0.75f, MAX_ZOOM = 3f;
     private final WebView web;
     private final SharedPreferences preferences;
