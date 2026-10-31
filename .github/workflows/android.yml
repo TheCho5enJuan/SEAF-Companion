@@ -35,6 +35,7 @@ jobs:
         with:
           path: ~/.android/debug.keystore
           key: seaf-companion-android-debug-signing-v1
+          save-always: true
       - name: Generate debug signing key on first build
         run: |
           mkdir -p "$HOME/.android"
