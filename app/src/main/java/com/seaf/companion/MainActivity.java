@@ -105,11 +105,15 @@ public class MainActivity extends Activity {
                     float dx=e.getRawX()-initial[0],dy=e.getRawY()-initial[1];
                     // Full-width portrait bar: restrict movement to the vertical axis.
                     panel.setTranslationY(Math.max(-availablePanelTravel(),Math.min(0,translation[1]+dy)));
+                    float maxX=Math.max(0,(root.getWidth()-panel.getWidth())/2f-dp(7));
+                    panel.setTranslationX(Math.max(-maxX,Math.min(maxX,translation[0]+dx)));
                     return true;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
-                    getPreferences(0).edit().putFloat("portraitBarOffsetDp",
-                        panel.getTranslationY()/getResources().getDisplayMetrics().density).apply();
+                    getPreferences(0).edit()
+                        .putFloat("portraitBarOffsetDp",panel.getTranslationY()/getResources().getDisplayMetrics().density)
+                        .putFloat("portraitBarOffsetXDp",panel.getTranslationX()/getResources().getDisplayMetrics().density)
+                        .apply();
                     viewport.setReservedBottom(Math.abs(panel.getTranslationY())<dp(24)?
                         Math.round((panel.getHeight()+dp(16))/
                             getResources().getDisplayMetrics().density):0);
@@ -127,6 +131,9 @@ public class MainActivity extends Activity {
         if(landscape||panel==null||root==null)return;
         float saved=getPreferences(0).getFloat("portraitBarOffsetDp",0);
         panel.setTranslationY(Math.max(-availablePanelTravel(),Math.min(0,dp(Math.round(saved)))));
+        float xSaved=getPreferences(0).getFloat("portraitBarOffsetXDp",0);
+        float maxX=Math.max(0,(root.getWidth()-panel.getWidth())/2f-dp(7));
+        panel.setTranslationX(Math.max(-maxX,Math.min(maxX,dp(Math.round(xSaved)))));
     }
     private void build(){
         landscape=getResources().getConfiguration().orientation==Configuration.ORIENTATION_LANDSCAPE;
@@ -144,9 +151,9 @@ public class MainActivity extends Activity {
             panel.setBackground(CompanionChrome.panel(getResources().getDisplayMetrics().density));
             panel.setElevation(dp(10));
             FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(
-                landscape?dp(expanded?270:88):-1,
+                landscape?dp(expanded?270:88):Math.min(dp(375),getResources().getDisplayMetrics().widthPixels-dp(20)),
                 FrameLayout.LayoutParams.WRAP_CONTENT,
-                landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM);
+                landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);
             params.setMargins(dp(9),0,dp(9),dp(10));
             root.addView(panel,params);
             panel.addOnLayoutChangeListener((v,l,t,r,bottom,ol,ot,or_,ob)->{
