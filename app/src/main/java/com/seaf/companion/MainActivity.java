@@ -29,6 +29,7 @@ public class MainActivity extends Activity {
     private boolean landscape;
     private boolean zoomRestored = false;
     private float savedPortraitScale = 0f;
+    private int zoomRestoreGeneration = 0;
     private final Handler zoomHandler = new Handler(Looper.getMainLooper());
     private final Runnable saveZoom = () -> {
         if(zoomRestored && !landscape && web != null) {
@@ -42,7 +43,7 @@ public class MainActivity extends Activity {
     private void restoreZoom(){
         if(landscape){zoomRestored=true;return;}
         zoomHandler.removeCallbacks(saveZoom);
-        if(savedPortraitScale >= 0.15f) {
+        if(savedPortraitScale >= 0.15f && savedPortraitScale <= 3.5f) {
             float current=web.getScale();
             if(current>0) web.zoomBy(Math.max(0.01f,Math.min(4.99f,savedPortraitScale/current)));
         }
@@ -81,8 +82,11 @@ public class MainActivity extends Activity {
                     zoomHandler.postDelayed(saveZoom,450);
                 }
             }
-            @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap favicon){zoomRestored=false;}
-            @Override public void onPageFinished(WebView v,String url){v.postDelayed(()->restoreZoom(),500);}
+            @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap favicon){zoomRestored=false;++zoomRestoreGeneration;zoomHandler.removeCallbacks(saveZoom);}
+            @Override public void onPageFinished(WebView v,String url){
+                final int generation=zoomRestoreGeneration;
+                v.postDelayed(()->{if(generation==zoomRestoreGeneration && !zoomRestored)restoreZoom();},500);
+            }
             @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){
                 String scheme=r.getUrl().getScheme();
                 if("https".equals(scheme)||"http".equals(scheme))return false;
@@ -120,7 +124,7 @@ public class MainActivity extends Activity {
         pane=new LinearLayout(this);pane.setOrientation(LinearLayout.VERTICAL);
         pane.setPadding(dp(10),dp(8),dp(10),dp(8));pane.setBackgroundColor(0xF007182C);
         FrameLayout.LayoutParams pos=new FrameLayout.LayoutParams(
-          landscape?dp(expanded?260:76):-1,dp(expanded?(landscape?220:290):44),
+          landscape?dp(expanded?260:76):-1,dp(expanded?(landscape?220:332):44),
           landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM);
         pos.setMargins(landscape?0:dp(8),0,landscape?dp(8):dp(8),landscape?0:dp(8));
         base.addView(pane,pos);
@@ -151,11 +155,11 @@ public class MainActivity extends Activity {
                 zoomRow.setGravity(Gravity.CENTER_VERTICAL);
                 zoomRow.addView(control("−",()->changeZoom(-0.12f)),new LinearLayout.LayoutParams(dp(45),dp(38)));
                 zoomSlider=new SeekBar(this);
-                zoomSlider.setMax(300);
+                zoomSlider.setMax(325);
                 zoomSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
                     public void onProgressChanged(SeekBar bar,int progress,boolean fromUser){
                         if(fromUser && !updatingZoomUi){
-                            float target=0.5f+progress/100f;
+                            float target=0.25f+progress/100f;
                             float current=web.getScale();
                             if(current>0f) web.zoomBy(Math.max(0.05f,Math.min(4.99f,target/current)));
                             updateZoomUi();
@@ -170,9 +174,10 @@ public class MainActivity extends Activity {
                 LinearLayout position=new LinearLayout(this);
                 position.setPadding(0,dp(3),0,0);
                 position.addView(control("←",()->panHorizontal(-0.15f)),new LinearLayout.LayoutParams(0,dp(36),1));
-                position.addView(control("Portrait Center",this::centerPortrait),new LinearLayout.LayoutParams(0,dp(36),3));
+                position.addView(control("Center",this::centerPortrait),new LinearLayout.LayoutParams(0,dp(36),2));
                 position.addView(control("→",()->panHorizontal(0.15f)),new LinearLayout.LayoutParams(0,dp(36),1));
                 pane.addView(position);
+                pane.addView(control("Reset zoom / full view",this::resetZoomToOverview),new LinearLayout.LayoutParams(-1,dp(36)));
                 updateZoomUi();
             }
         }
@@ -184,13 +189,13 @@ public class MainActivity extends Activity {
         if(zoomLabel!=null)zoomLabel.setText(String.format(Locale.US,"Zoom  %.0f%%",scale*100));
         if(zoomSlider!=null && !updatingZoomUi){
             updatingZoomUi=true;
-            zoomSlider.setProgress(Math.max(0,Math.min(300,Math.round((scale-0.5f)*100))));
+            zoomSlider.setProgress(Math.max(0,Math.min(300,Math.round((scale-0.25f)*100))));
             updatingZoomUi=false;
         }
     }
     private void changeZoom(float change){
         float current=web.getScale();
-        float target=Math.max(0.5f,Math.min(3.5f,current+change));
+        float target=Math.max(0.25f,Math.min(3.5f,current+change));
         if(current>0f)web.zoomBy(Math.max(0.05f,Math.min(4.99f,target/current)));
         updateZoomUi();
     }
@@ -198,9 +203,19 @@ public class MainActivity extends Activity {
         int max=web.maxHorizontal();
         web.scrollTo(Math.max(0,Math.min(max,web.getScrollX()+Math.round(max*delta))),web.getScrollY());
     }
+    private void resetZoomToOverview(){
+        savedPortraitScale=0f;
+        getPreferences(0).edit().remove("savedPortraitScale").apply();
+        zoomRestored=false;
+        web.setInitialScale(0);
+        web.reload();
+    }
     private void centerPortrait(){
         // Recenters the document horizontally without reloading or changing zoom.
-        web.post(()->web.moveHorizontal(0.5f));
+        web.post(()->{
+            web.moveHorizontal(0.5f);
+            web.evaluateJavascript("(function(){var x=Math.max(0,(document.documentElement.scrollWidth-innerWidth)/2); window.scrollTo(x,scrollY);})();",null);
+        });
     }
     private void updateTimer(){
         if(countdown==null)return;
