@@ -12,6 +12,9 @@ import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.content.res.Configuration;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
@@ -33,6 +36,14 @@ public class MainActivity extends Activity {
     private FrameLayout root;
     private boolean immersive = true;
     private SessionRecorder recorder;
+    private boolean portraitFit = false;
+    private final Handler layoutHandler = new Handler(Looper.getMainLooper());
+    private final Runnable layoutTick = new Runnable() {
+        @Override public void run() {
+            applyPortraitFit();
+            layoutHandler.postDelayed(this, 2200);
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -54,6 +65,10 @@ public class MainActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient());
         recorder = new SessionRecorder(this, webView);
         webView.setWebViewClient(new WebViewClient() {
+            @Override public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                applyPortraitFit();
+            }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 String scheme = uri.getScheme();
@@ -84,6 +99,8 @@ public class MainActivity extends Activity {
         setOrientation(orientation);
         immersive = getPreferences(0).getBoolean("immersive", true);
         updateFullscreen();
+        portraitFit = getPreferences(0).getBoolean("portraitFit", false);
+        layoutHandler.post(layoutTick);
         webView.loadUrl(GAME_URL);
     }
     private int dp(int n) { return (int)(n * getResources().getDisplayMetrics().density + .5f); }
@@ -101,6 +118,13 @@ public class MainActivity extends Activity {
             getPreferences(0).edit().putBoolean("immersive", immersive).apply();
             updateFullscreen(); return true;
         });
+        popup.getMenu().add(portraitFit ? "Portrait fit: ON (tap to disable)" : "Portrait fit: OFF (tap to enable)")
+            .setOnMenuItemClickListener(i -> {
+                portraitFit = !portraitFit;
+                getPreferences(0).edit().putBoolean("portraitFit", portraitFit).apply();
+                applyPortraitFit();
+                return true;
+            });
         popup.getMenu().add("Zoom in").setOnMenuItemClickListener(i -> { webView.zoomIn(); return true; });
         popup.getMenu().add("Zoom out").setOnMenuItemClickListener(i -> { webView.zoomOut(); return true; });
         popup.getMenu().add(recorder.isRecording() ? "Stop capture session + export ZIP" : "Start capture session").setOnMenuItemClickListener(i -> {
@@ -224,6 +248,47 @@ public class MainActivity extends Activity {
         return uri;
     }
 
+    private void applyPortraitFit() {
+        if (webView == null || webView.getUrl() == null) return;
+        Uri uri = Uri.parse(webView.getUrl());
+        if (!"seaf.se".equalsIgnoreCase(uri.getHost())) return;
+        boolean enabled = portraitFit &&
+            getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
+        String js = "(function(){"+
+            "var e=document.querySelector('#page-home > .scale-me.pos-abs-c');"+
+            "if(!e)return;"+
+            "var key='seaf-companion-original';"+
+            "if(!e.hasAttribute('data-'+key)){"+
+            "e.setAttribute('data-'+key,'1');"+
+            "e.dataset.seafOriginalZoom=e.style.getPropertyValue('zoom');"+
+            "e.dataset.seafOriginalTransform=e.style.getPropertyValue('transform');"+
+            "e.dataset.seafOriginalLeft=e.style.getPropertyValue('left');"+
+            "e.dataset.seafOriginalTop=e.style.getPropertyValue('top');"+
+            "e.dataset.seafOriginalOrigin=e.style.getPropertyValue('transform-origin');"+
+            "}"+
+            "if("+enabled+"){"+
+            "var frame=document.getElementById('page-home');"+
+            "var w=frame.getBoundingClientRect().width;"+
+            "if(w<100)return;"+
+            "var scale=Math.max(0.16,Math.min(1,(w-4)/1600));"+
+            "e.style.setProperty('zoom','1','important');"+
+            "e.style.setProperty('left','50%','important');"+
+            "e.style.setProperty('top','50%','important');"+
+            "e.style.setProperty('transform-origin','center center','important');"+
+            "e.style.setProperty('transform','translate(-50%, -50%) scale('+scale+')','important');"+
+            "}else if(e.hasAttribute('data-'+key)){"+
+            "['zoom','transform','left','top','transform-origin'].forEach(function(p){e.style.removeProperty(p)});"+
+            "var names={'zoom':'Zoom','transform':'Transform','left':'Left','top':'Top','transform-origin':'Origin'};"+
+            "Object.keys(names).forEach(function(p){var v=e.dataset['seafOriginal'+names[p]];if(v)e.style.setProperty(p,v)});"+
+            "e.removeAttribute('data-'+key);"+
+            "}"+
+            "})();";
+        webView.evaluateJavascript(js, null);
+    }
+    @Override public void onConfigurationChanged(Configuration config) {
+        super.onConfigurationChanged(config);
+        webView.postDelayed(this::applyPortraitFit, 350);
+    }
     private void setOrientation(int mode) {
         getPreferences(0).edit().putInt("orientation", mode).apply();
         setRequestedOrientation(mode == 1 ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT :
@@ -247,5 +312,5 @@ public class MainActivity extends Activity {
         else super.onBackPressed();
     }
     @Override protected void onPause() { CookieManager.getInstance().flush(); super.onPause(); }
-    @Override protected void onDestroy() { recorder.close(); root.removeView(webView); webView.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() { layoutHandler.removeCallbacks(layoutTick); recorder.close(); root.removeView(webView); webView.destroy(); super.onDestroy(); }
 }
