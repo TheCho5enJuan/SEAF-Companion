@@ -91,22 +91,26 @@ public final class GameViewport extends FrameLayout {
               // Overview is the only mode that tries to show all 1600x900.
               var fitWidth=(width-4)/stageW;
               var fitHeight=(usableH-4)/stageH;
-              // A focused view shows about 42% of the total game width,
-              // with 13% overlap between neighboring 42% slices.
-              // Constrain height to the space above the companion bar.
-              var focusFraction=0.42;
+              // Layout-aware framing based on the two captured screens:
+              // the mission preview occupies the left portion while the
+              // mission list extends nearly to the right edge.
+              // Each focused view contains ~54% of the stage, overlapping
+              // adjacent views. Fit to the available height when shorter.
+              var focusFraction=0.54;
+              var fitHeight=Math.max(0.01,(usableH-4)/stageH);
+              var fitWidth=Math.max(0.01,(width-4)/stageW);
               var focusFit=Math.min(fitHeight,(width-4)/(stageW*focusFraction));
               var base=this.fit==='height'?focusFit:Math.min(fitWidth,fitHeight);
               var factor=Math.max(0.01,base);
               var extraX=Math.max(0,(stageW*factor-width)/2);
               var extraY=Math.max(0,(stageH*factor-usableH)/2);
-              // Each preset targets the CENTER of the corresponding third.
-              // Bound movement so no empty left/right margins appear.
-              var third=(this.region-1)*(stageW/3)*factor;
-              var pan=Math.max(-extraX,Math.min(extraX,this.dx-third));
+              // The presets are edge-anchored rather than centered on
+              // mathematical thirds. This exposes the full right-side list.
+              var anchor=(1-this.region)*extraX;
+              var pan=Math.max(-extraX,Math.min(extraX,anchor+this.dx));
               var x=width/2+pan;
               var y=usableH/2+Math.max(-extraY,Math.min(extraY,this.dy));
-              var key=[width,height,stageW,stageH,factor,x,y].join('|');
+                            var key=[width,height,stageW,stageH,factor,x,y].join('|');
               // Avoid repeatedly invalidating the game renderer each second.
               if(key===this.signature &&
                  e.style.getPropertyValue('transform').indexOf('scale(')>=0) return;
