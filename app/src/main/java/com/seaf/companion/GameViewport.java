@@ -5,9 +5,6 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.GestureDetector;
-import android.view.MotionEvent;
-import android.view.ScaleGestureDetector;
 import android.view.ViewGroup;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
@@ -28,8 +25,6 @@ public final class GameViewport extends FrameLayout {
     private final WebView web;
     private final SharedPreferences preferences;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final ScaleGestureDetector scaleDetector;
-    private final GestureDetector doubleTap;
     private ZoomListener listener;
     private boolean originalMode, landscape, rememberZoom, autoCenter;
     private float zoom, offsetX, offsetY;
@@ -37,8 +32,6 @@ public final class GameViewport extends FrameLayout {
     private int focusRegion;
     private int reservedBottomDp;
     private int pageGeneration;
-    private float lastFocusX, lastFocusY;
-    private boolean multiTouch;
 
     // The selector and 1600x900 dimensions come from the original SEAF
     // portrait-fit implementation, not a guess about an arbitrary page.
@@ -98,8 +91,13 @@ public final class GameViewport extends FrameLayout {
               // Overview is the only mode that tries to show all 1600x900.
               var fitWidth=(width-4)/stageW;
               var fitHeight=(usableH-4)/stageH;
-              var base=this.fit==='height'?fitHeight:Math.min(fitWidth,fitHeight);
-              var factor=Math.max(0.01,base*this.zoom);
+              // A focused view shows about 42% of the total game width,
+              // with 13% overlap between neighboring 42% slices.
+              // Constrain height to the space above the companion bar.
+              var focusFraction=0.42;
+              var focusFit=Math.min(fitHeight,(width-4)/(stageW*focusFraction));
+              var base=this.fit==='height'?focusFit:Math.min(fitWidth,fitHeight);
+              var factor=Math.max(0.01,base);
               var extraX=Math.max(0,(stageW*factor-width)/2);
               var extraY=Math.max(0,(stageH*factor-usableH)/2);
               // Each preset targets the CENTER of the corresponding third.
@@ -142,60 +140,15 @@ public final class GameViewport extends FrameLayout {
         preferences=activity.getPreferences(0);
         rememberZoom=preferences.getBoolean("rememberZoom",true);
         autoCenter=preferences.getBoolean("autoCenter",true);
-        zoom=rememberZoom?preferences.getFloat("companionZoomV4",1f):1f;
-        zoom=Math.max(MIN_ZOOM,Math.min(MAX_ZOOM,zoom));
+        // Only the four view presets apply: ignore obsolete stored manual zoom.
+        zoom=1f;
         heightFit=preferences.getBoolean("portraitHeightFitV4",true);
         focusRegion=Math.max(LEFT,Math.min(RIGHT,preferences.getInt("portraitRegionV4",CENTER)));
         setClipChildren(true);
         setClipToPadding(true);
         addView(web,new LayoutParams(-1,-1));
-        scaleDetector=new ScaleGestureDetector(activity,
-            new ScaleGestureDetector.SimpleOnScaleGestureListener(){
-                @Override public boolean onScale(ScaleGestureDetector detector){
-                    if(landscape||originalMode)return false;
-                    setZoom(zoom*detector.getScaleFactor());
-                    return true;
-                }
-            });
-        doubleTap=new GestureDetector(activity,
-            new GestureDetector.SimpleOnGestureListener(){
-                @Override public boolean onDown(MotionEvent e){return true;}
-                @Override public boolean onDoubleTap(MotionEvent e){
-                    if(landscape||originalMode)return false;
-                    if(zoom>1.2f)resetFit();
-                    else setZoom(1.7f);
-                    return true;
-                }
-            });
-        web.setOnTouchListener((v,event)->{
-            if(landscape||originalMode)return false;
-            scaleDetector.onTouchEvent(event);
-            doubleTap.onTouchEvent(event);
-            int action=event.getActionMasked();
-            if(action==MotionEvent.ACTION_POINTER_DOWN && event.getPointerCount()>=2){
-                multiTouch=true;
-                lastFocusX=(event.getX(0)+event.getX(1))/2f;
-                lastFocusY=(event.getY(0)+event.getY(1))/2f;
-                return true;
-            }
-            if(event.getPointerCount()>=2){
-                if(action==MotionEvent.ACTION_MOVE){
-                    float x=(event.getX(0)+event.getX(1))/2f;
-                    float y=(event.getY(0)+event.getY(1))/2f;
-                    offsetX+=(x-lastFocusX)/getResources().getDisplayMetrics().density;
-                    offsetY+=(y-lastFocusY)/getResources().getDisplayMetrics().density;
-                    lastFocusX=x;lastFocusY=y;
-                    applyLayout();
-                }
-                return true;
-            }
-            if(action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL){
-                boolean wasMulti=multiTouch;
-                multiTouch=false;
-                return wasMulti;
-            }
-            return multiTouch||scaleDetector.isInProgress();
-        });
+        // No custom touch handler: let SEAF receive normal taps and gestures.
+
     }
 
     public void setZoomListener(ZoomListener l){listener=l;notifyZoom();}
@@ -251,7 +204,6 @@ public final class GameViewport extends FrameLayout {
         SharedPreferences.Editor editor=preferences.edit()
             .putBoolean("portraitHeightFitV4",heightFit)
             .putInt("portraitRegionV4",focusRegion);
-        if(rememberZoom)editor.putFloat("companionZoomV4",zoom);
         editor.apply();
     }
     public void selectRegion(int region){
