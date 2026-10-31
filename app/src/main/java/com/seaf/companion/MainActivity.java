@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
             }
         });
         expanded=getPreferences(0).getBoolean("expanded",true);
+        TimerReceiver.ensureChannel(this);
         build();
         tick.post(clock);
         web.loadUrl("https://seaf.se/");
@@ -126,9 +127,14 @@ public class MainActivity extends Activity {
           }).setNegativeButton("Close",null).show();
     }
     private void showSettings(){
-        String[] options={"Notification settings","Battery/background settings","Mobile data settings","Refresh original game"};
+        String[] options={"Mission alert sound settings","Battery/background settings","Mobile data settings","Refresh original game"};
         new AlertDialog.Builder(this).setTitle("Companion settings").setItems(options,(d,which)->{
-            if(which==0)openSettings(Settings.ACTION_APP_NOTIFICATION_SETTINGS,"android.provider.extra.APP_PACKAGE");
+            if(which==0){
+                try{Intent i=new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS);
+                    i.putExtra(Settings.EXTRA_APP_PACKAGE,getPackageName());
+                    i.putExtra(Settings.EXTRA_CHANNEL_ID,TimerReceiver.CHANNEL_ID);startActivity(i);
+                }catch(Exception e){openSettings(Settings.ACTION_APP_NOTIFICATION_SETTINGS,"android.provider.extra.APP_PACKAGE");}
+            }
             if(which==1)openSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,null);
             if(which==2)openSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,null);
             if(which==3)web.reload();
