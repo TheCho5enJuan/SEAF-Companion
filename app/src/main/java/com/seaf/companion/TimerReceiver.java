@@ -27,6 +27,8 @@ public class TimerReceiver extends BroadcastReceiver {
         manager.createNotificationChannel(channel);
     }
     @Override public void onReceive(Context context,Intent intent) {
+        int reminderId=intent==null?-1:intent.getIntExtra("id",-1);
+        if(reminderId<0 || !ReminderScheduler.finish(context,reminderId))return;
         ensureChannel(context);
         if(Build.VERSION.SDK_INT>=33 &&
            context.checkSelfPermission("android.permission.POST_NOTIFICATIONS") !=
@@ -46,6 +48,6 @@ public class TimerReceiver extends BroadcastReceiver {
             .setDefaults(Notification.DEFAULT_SOUND|Notification.DEFAULT_VIBRATE)
             .setContentIntent(tap)
             .setAutoCancel(true).build();
-        context.getSystemService(NotificationManager.class).notify(1001,alert);
+        context.getSystemService(NotificationManager.class).notify(1001+reminderId,alert);
     }
 }
