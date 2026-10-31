@@ -151,7 +151,7 @@ public class MainActivity extends Activity {
             panel.setBackground(CompanionChrome.panel(getResources().getDisplayMetrics().density));
             panel.setElevation(dp(10));
             FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(
-                landscape?dp(expanded?270:88):Math.min(dp(375),getResources().getDisplayMetrics().widthPixels-dp(20)),
+                landscape?dp(expanded?255:178):Math.min(dp(375),getResources().getDisplayMetrics().widthPixels-dp(20)),
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);
             params.setMargins(dp(9),0,dp(9),dp(10));
@@ -203,8 +203,10 @@ public class MainActivity extends Activity {
                     }),1);
                 installDragHandle(bar);
             }else{
-                TextView name=label(expanded?"SEAF COMPANION":"SEAF",13,true);
-                bar.addView(name,new LinearLayout.LayoutParams(0,dp(46),1));
+                if(expanded){
+                    TextView name=label("SEAF",12,true);
+                    bar.addView(name,new LinearLayout.LayoutParams(0,dp(46),0.65f));
+                }
                 addIcon(bar,iconButton("rotate","Switch to portrait",()->applyOrientation(1)),1);
                 addIcon(bar,iconButton("settings","Settings",this::showSettings),1);
                 addIcon(bar,iconButton(expanded?"collapse":"expand",
@@ -233,12 +235,7 @@ public class MainActivity extends Activity {
                 actions.addView(fullscreenButton,new LinearLayout.LayoutParams(0,dp(43),1));
                 panel.addView(actions);
             }
-            if(landscape&&!expanded){
-                // Always-available orientation escape for any landscape lock.
-                CompanionChrome.Icon back=iconButton("rotate","Return to portrait",()->applyOrientation(1));
-                FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(dp(45),dp(45),Gravity.RIGHT|Gravity.TOP);
-                p.setMargins(0,dp(8),dp(8),0);root.addView(back,p);
-            }
+
         }else{
             TextView restore=button("Companion",()->setOriginal(false));
             restore.setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,false));
