@@ -102,6 +102,12 @@ public final class CompanionChrome {
                     p.setStrokeWidth(4.4f);canvas.drawCircle(24,24,12,p);
                     p.setStrokeWidth(2.7f);canvas.drawCircle(24,24,4,p);
                     break;
+                case "orientation":
+                    // Clear portrait/landscape device silhouette rather than circular reload arrow.
+                    p.setStrokeWidth(2.8f);
+                    canvas.drawRoundRect(10,17,31,33,3,3,p);
+                    canvas.drawRoundRect(24,9,37,27,3,3,p);
+                    break;
                 case "rotate":
                     p.setStrokeWidth(3.5f);
                     canvas.drawArc(10,10,38,38,-80,295,false,p);
