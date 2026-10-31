@@ -197,25 +197,116 @@ public class MainActivity extends Activity {
         }
     }
     private void updateTimer(){
+        java.util.ArrayList<ReminderScheduler.Reminder> reminders=ReminderScheduler.list(this);
+        if(timerButton!=null)timerButton.setText("Timers ("+reminders.size()+")");
         if(countdown==null)return;
-        long due=getPreferences(0).getLong("timerDue",0);
-        if(due==0){countdown.setText("No reminder");return;}
-        long left=Math.max(0,due-System.currentTimeMillis())/1000;
-        if(left==0){countdown.setText("Reminder ready");return;}
-        countdown.setText(String.format(Locale.US,"%02d:%02d:%02d",left/3600,left/60%60,left%60));
+        if(reminders.isEmpty()){countdown.setText("No active reminders");return;}
+        long remaining=Math.max(0,reminders.get(0).due-System.currentTimeMillis())/1000;
+        String time=String.format(Locale.US,"%02d:%02d:%02d",
+            remaining/3600,remaining/60%60,remaining%60);
+        countdown.setText((remaining==0?"Due now":time)+
+            (reminders.size()>1?"  +"+(reminders.size()-1)+" more":""));
+    }
+    private TextView dialogLabel(String text,int size){
+        TextView t=new TextView(this);
+        t.setText(text);t.setTextSize(size);t.setTextColor(0xFF25354A);
+        t.setPadding(dp(3),dp(5),dp(3),dp(5));
+        return t;
+    }
+    private void startQuickTimer(String category,int minutes,AlertDialog dialog){
+        if(minutes<1||minutes>10080){
+            Toast.makeText(this,"Enter 1–10080 minutes",Toast.LENGTH_LONG).show();
+            return;
+        }
+        ReminderScheduler.Reminder reminder=ReminderScheduler.schedule(this,
+            System.currentTimeMillis()+minutes*60000L,
+            category+" ("+minutes+"m)");
+        if(reminder==null){
+            Toast.makeText(this,"Maximum 12 active reminders",Toast.LENGTH_LONG).show();
+            return;
+        }
+        if(Build.VERSION.SDK_INT>=33 &&
+            checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=
+               android.content.pm.PackageManager.PERMISSION_GRANTED){
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},7);
+        }
+        updateTimer();
+        Toast.makeText(this,category+" reminder set for "+minutes+" minutes",Toast.LENGTH_SHORT).show();
+        if(dialog!=null)dialog.dismiss();
     }
     private void showTimer(){
-        EditText field=new EditText(this);field.setInputType(2);field.setHint("Minutes");
-        new AlertDialog.Builder(this).setTitle("Manual mission reminder")
-            .setMessage("Reminders run independently of the game.")
-            .setView(field).setPositiveButton("Set",(d,w)->{
-                int n=0;try{n=Integer.parseInt(field.getText().toString());}catch(Exception ignored){}
-                if(n<1||n>10080){Toast.makeText(this,"Enter 1–10080 minutes",Toast.LENGTH_LONG).show();return;}
-                if(Build.VERSION.SDK_INT>=33&&checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED)
-                    requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},7);
-                ReminderScheduler.schedule(this,System.currentTimeMillis()+n*60000L);updateTimer();
-            }).setNeutralButton("Cancel reminder",(d,w)->{ReminderScheduler.cancel(this);updateTimer();})
-            .setNegativeButton("Close",null).show();
+        ScrollView scroll=new ScrollView(this);
+        LinearLayout body=new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(18),dp(10),dp(18),dp(6));
+        scroll.addView(body);
+        body.addView(dialogLabel("Quick reminders (manual, not synced to SEAF)",13));
+        RadioGroup type=new RadioGroup(this);
+        type.setOrientation(RadioGroup.HORIZONTAL);
+        RadioButton mission=new RadioButton(this);mission.setText("Mission");
+        mission.setTextColor(0xFF25354A);mission.setId(View.generateViewId());
+        RadioButton care=new RadioButton(this);care.setText("Care / Minigame");
+        care.setTextColor(0xFF25354A);care.setId(View.generateViewId());
+        type.addView(mission);type.addView(care);
+        type.check(mission.getId());
+        body.addView(type);
+        final AlertDialog[] current={null};
+        int[][] durations={{5,10,15},{30,60}};
+        for(int[] group:durations){
+            LinearLayout row=new LinearLayout(this);
+            row.setPadding(0,dp(3),0,dp(3));
+            for(int minutes:group){
+                TextView quick=button(minutes+" min",()->startQuickTimer(
+                    care.isChecked()?"Care":"Mission",minutes,current[0]));
+                LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(42),1);
+                p.setMargins(dp(2),0,dp(2),0);
+                row.addView(quick,p);
+            }
+            body.addView(row);
+        }
+        LinearLayout custom=new LinearLayout(this);
+        custom.setGravity(Gravity.CENTER_VERTICAL);
+        EditText minutes=new EditText(this);
+        minutes.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        minutes.setSingleLine(true);
+        minutes.setHint("Custom minutes");
+        minutes.setTextColor(0xFF25354A);
+        custom.addView(minutes,new LinearLayout.LayoutParams(0,dp(54),1));
+        TextView add=button("Start",()->{
+            int value=0;
+            try{value=Integer.parseInt(minutes.getText().toString().trim());}
+            catch(NumberFormatException ignored){}
+            startQuickTimer(care.isChecked()?"Care":"Mission",value,current[0]);
+        });
+        custom.addView(add,new LinearLayout.LayoutParams(dp(86),dp(42)));
+        body.addView(custom);
+        body.addView(dialogLabel("Active reminders",17));
+        java.util.ArrayList<ReminderScheduler.Reminder> active=ReminderScheduler.list(this);
+        if(active.isEmpty())body.addView(dialogLabel("None yet",13));
+        for(ReminderScheduler.Reminder r:active){
+            LinearLayout row=new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            long remaining=Math.max(0,r.due-System.currentTimeMillis())/1000;
+            String duration=String.format(Locale.US,"%dh %02dm",remaining/3600,(remaining/60)%60);
+            TextView name=dialogLabel(r.label+"   ·   "+duration+" left",13);
+            row.addView(name,new LinearLayout.LayoutParams(0,dp(46),1));
+            TextView cancel=button("Cancel",()->{
+                ReminderScheduler.cancel(this,r.id);
+                updateTimer();
+                if(current[0]!=null)current[0].dismiss();
+                showTimer();
+            });
+            row.addView(cancel,new LinearLayout.LayoutParams(dp(84),dp(38)));
+            body.addView(row);
+        }
+        body.addView(dialogLabel("Android may delay alerts when exact alarms are restricted. "+
+            "You can change the alert sound in Companion Settings.",12));
+        current[0]=new AlertDialog.Builder(this)
+            .setTitle("SEAF Timers")
+            .setView(scroll)
+            .setNegativeButton("Close",null)
+            .create();
+        current[0].show();
     }
     private void showSettings(){
         String[] opts={"Original game mode","Auto rotate","Lock portrait","Lock landscape",
