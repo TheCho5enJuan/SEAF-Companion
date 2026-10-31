@@ -24,6 +24,7 @@ import java.util.Locale;
 public final class GameViewport extends FrameLayout {
     public interface ZoomListener { void changed(float zoom); }
     private static final float MIN_ZOOM = 0.30f, MAX_ZOOM = 3.0f;
+    public static final int LEFT = 0, CENTER = 1, RIGHT = 2;
     private final WebView web;
     private final SharedPreferences preferences;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -32,6 +33,8 @@ public final class GameViewport extends FrameLayout {
     private ZoomListener listener;
     private boolean originalMode, landscape, rememberZoom, autoCenter;
     private float zoom, offsetX, offsetY;
+    private boolean heightFit;
+    private int focusRegion;
     private int reservedBottomDp;
     private int pageGeneration;
     private float lastFocusX, lastFocusY;
@@ -46,6 +49,7 @@ public final class GameViewport extends FrameLayout {
           if (window.__seafCompanionLayout) return;
           var state = {
             enabled:false, zoom:1, dx:0, dy:0, bottom:0,
+            fit:'overview', region:1,
             stage:null, saved:null, signature:'',
             keys:['zoom','left','top','transform','transform-origin'],
             find:function(){
@@ -90,12 +94,20 @@ public final class GameViewport extends FrameLayout {
               if(width<100||height<100||stageW<100||stageH<100)return;
               var bottom=Math.max(0,Math.min(this.bottom,height*0.55));
               var usableH=Math.max(150,height-bottom);
-              var fit=Math.min((width-4)/stageW,(usableH-4)/stageH);
-              var factor=Math.max(0.01,fit*this.zoom);
+              // Focus mode uses the height not occupied by the companion.
+              // Overview is the only mode that tries to show all 1600x900.
+              var fitWidth=(width-4)/stageW;
+              var fitHeight=(usableH-4)/stageH;
+              var base=this.fit==='height'?fitHeight:Math.min(fitWidth,fitHeight);
+              var factor=Math.max(0.01,base*this.zoom);
               var extraX=Math.max(0,(stageW*factor-width)/2);
               var extraY=Math.max(0,(stageH*factor-usableH)/2);
-              var x=width/2 + Math.max(-extraX,Math.min(extraX,this.dx));
-              var y=usableH/2 + Math.max(-extraY,Math.min(extraY,this.dy));
+              // Each preset targets the CENTER of the corresponding third.
+              // Bound movement so no empty left/right margins appear.
+              var third=(this.region-1)*(stageW/3)*factor;
+              var pan=Math.max(-extraX,Math.min(extraX,this.dx-third));
+              var x=width/2+pan;
+              var y=usableH/2+Math.max(-extraY,Math.min(extraY,this.dy));
               var key=[width,height,stageW,stageH,factor,x,y].join('|');
               // Avoid repeatedly invalidating the game renderer each second.
               if(key===this.signature &&
@@ -108,9 +120,11 @@ public final class GameViewport extends FrameLayout {
               e.style.setProperty('transform',
                 'translate(-50%, -50%) scale('+factor+')','important');
             },
-            set:function(enabled,z,x,y,bottom){
+            set:function(enabled,z,x,y,bottom,fit,region){
               this.enabled=!!enabled;
               this.zoom=z;this.dx=x;this.dy=y;this.bottom=bottom;
+              this.fit=fit==='height'?'height':'overview';
+              this.region=Math.max(0,Math.min(2,region));
               this.signature='';
               this.apply();
             }
@@ -128,8 +142,10 @@ public final class GameViewport extends FrameLayout {
         preferences=activity.getPreferences(0);
         rememberZoom=preferences.getBoolean("rememberZoom",true);
         autoCenter=preferences.getBoolean("autoCenter",true);
-        zoom=rememberZoom?preferences.getFloat("companionZoomV3",1f):1f;
+        zoom=rememberZoom?preferences.getFloat("companionZoomV4",1f):1f;
         zoom=Math.max(MIN_ZOOM,Math.min(MAX_ZOOM,zoom));
+        heightFit=preferences.getBoolean("portraitHeightFitV4",true);
+        focusRegion=Math.max(LEFT,Math.min(RIGHT,preferences.getInt("portraitRegionV4",CENTER)));
         setClipChildren(true);
         setClipToPadding(true);
         addView(web,new LayoutParams(-1,-1));
@@ -222,12 +238,43 @@ public final class GameViewport extends FrameLayout {
         if(web.getParent()!=this||!isGameDomain())return;
         boolean active=!landscape&&!originalMode;
         String script=String.format(Locale.US,
-            "(function(){var v=window.__seafCompanionLayout;if(v)v.set(%s,%.4f,%.2f,%.2f,%d);})();",
-            active?"true":"false",zoom,offsetX,offsetY,active?reservedBottomDp:0);
+            "(function(){var v=window.__seafCompanionLayout;if(v)v.set(%s,%.4f,%.2f,%.2f,%d,'%s',%d);})();",
+            active?"true":"false",zoom,offsetX,offsetY,active?reservedBottomDp:0,
+            heightFit?"height":"overview",focusRegion);
         web.evaluateJavascript(script,null);
     }
     public void setReservedBottom(int heightDp){reservedBottomDp=heightDp;applyLayout();}
     public void center(){offsetX=0;offsetY=0;applyLayout();}
+    public boolean isHeightFit(){return heightFit;}
+    public int getFocusRegion(){return focusRegion;}
+    private void persistView(){
+        SharedPreferences.Editor editor=preferences.edit()
+            .putBoolean("portraitHeightFitV4",heightFit)
+            .putInt("portraitRegionV4",focusRegion);
+        if(rememberZoom)editor.putFloat("companionZoomV4",zoom);
+        editor.apply();
+    }
+    public void selectRegion(int region){
+        if(landscape||originalMode)return;
+        focusRegion=Math.max(LEFT,Math.min(RIGHT,region));
+        heightFit=true;
+        zoom=1f;
+        offsetX=offsetY=0;
+        persistView();
+        applyLayout();notifyZoom();
+    }
+    public void showOverview(){
+        if(landscape||originalMode)return;
+        heightFit=false;focusRegion=CENTER;
+        zoom=1f;offsetX=offsetY=0;
+        persistView();applyLayout();notifyZoom();
+    }
+    public void showHeightFit(){
+        if(landscape||originalMode)return;
+        heightFit=true;focusRegion=CENTER;
+        zoom=1f;offsetX=offsetY=0;
+        persistView();applyLayout();notifyZoom();
+    }
     public void pan(float x,float y){
         if(landscape||originalMode)return;
         offsetX=Math.max(-1500,Math.min(1500,offsetX+x));
@@ -239,19 +286,19 @@ public final class GameViewport extends FrameLayout {
         float next=Math.max(MIN_ZOOM,Math.min(MAX_ZOOM,z));
         if(Math.abs(next-zoom)<0.001f)return;
         zoom=next;
-        if(rememberZoom)preferences.edit().putFloat("companionZoomV3",zoom).apply();
+        persistView();
         applyLayout();notifyZoom();
     }
     public void adjustZoom(float delta){setZoom(zoom+delta);}
-    public void resetFit(){setZoom(1f);center();}
+    public void resetFit(){showOverview();}
     public void fill(){
         // Optional center crop; the panel retains the always-available Fit control.
-        setZoom(2f);center();
+        showHeightFit();
     }
     public void setRememberZoom(boolean remember){
         rememberZoom=remember;
         preferences.edit().putBoolean("rememberZoom",remember).apply();
-        if(remember)preferences.edit().putFloat("companionZoomV3",zoom).apply();
+        if(remember)preferences.edit().putFloat("companionZoomV4",zoom).apply();
     }
     public void setAutoCenter(boolean value){
         autoCenter=value;
