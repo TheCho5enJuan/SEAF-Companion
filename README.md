@@ -12,7 +12,9 @@
 - Local timer logic does **not** synchronize with SEAF servers; no claim of automatic mission detection.
 
 ## Screenshots
-Screenshots are being prepared for publication. See [screenshot guidance](docs/SCREENSHOTS.md). Do not publish screenshots that reveal player handles, account information, or notification contents without review.
+![Companion panel — illustrative preview](docs/screenshots/companion-preview.svg)
+
+*Illustrative interface preview, not an actual app screenshot.* Authentic Play Store screenshots are still pending privacy and intellectual-property review. See [screenshot guidance](docs/SCREENSHOTS.md). Do not publish screenshots that reveal player handles, account information, or notification contents without review.
 
 ## Installation (testing only)
 1. Open [Actions](../../actions/workflows/android.yml) and select a successful build.
