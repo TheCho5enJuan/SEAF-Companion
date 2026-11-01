@@ -769,55 +769,101 @@ public class MainActivity extends Activity {
         if(ambientEnabled&&ambientForeground&&!isFinishing()&&!exiting)
             handler.postDelayed(ambientTick,milliseconds);
     }
+    /** Obtain the rendered SEAF stage bounds, excluding HUD and letterbox. */
+    private void refreshAmbientStage(){
+        if(ambientGeometryPending||web==null||!ambientForeground)return;
+        ambientGeometryPending=true;
+        web.evaluateJavascript("""
+            (function(){
+              var el=document.querySelector('#page-home > .scale-me.pos-abs-c') ||
+                document.querySelector('#page-home .scale-me.pos-abs-c');
+              if(!el)return null;
+              var r=el.getBoundingClientRect();
+              var v=window.visualViewport;
+              var sx=window.innerWidth/(v?v.width:window.innerWidth);
+              if(!Number.isFinite(sx)||sx<0.5||sx>5)sx=1;
+              return [r.left,r.top,r.right,r.bottom,window.innerWidth,window.innerHeight];
+            })();
+            """,value->{
+            ambientGeometryPending=false;
+            try{
+                org.json.JSONArray data=new org.json.JSONArray(value);
+                if(data.length()!=6)return;
+                double cssW=data.getDouble(4),cssH=data.getDouble(5);
+                if(cssW<100||cssH<100)return;
+                double xScale=web.getWidth()/cssW,yScale=web.getHeight()/cssH;
+                int l=(int)Math.round(data.getDouble(0)*xScale);
+                int t=(int)Math.round(data.getDouble(1)*yScale);
+                int r=(int)Math.round(data.getDouble(2)*xScale);
+                int b=(int)Math.round(data.getDouble(3)*yScale);
+                // Intersect with actual viewport. Reject tiny cropped fragments.
+                l=Math.max(0,l);t=Math.max(0,t);
+                r=Math.min(web.getWidth(),r);b=Math.min(web.getHeight(),b);
+                if(r-l<web.getWidth()*.30f||b-t<web.getHeight()*.10f)return;
+                ambientStageRect=new android.graphics.Rect(l,t,r,b);
+                ambientGeometryUpdatedAt=android.os.SystemClock.uptimeMillis();
+            }catch(Exception ignored){}
+        });
+    }
     private void updateAmbient(){
         if(!ambientEnabled||!ambientForeground||web==null||ambientView==null||
            ambientView.getVisibility()!=View.VISIBLE||web.getWidth()<1||
            web.getHeight()<1||ambientCopyBusy)return;
-        if(Build.VERSION.SDK_INT<26){scheduleNextAmbient(1500);return;}
-        final ImageView destination=ambientView;
+        if(Build.VERSION.SDK_INT<26){scheduleNextAmbient(1800);return;}
+        long now=android.os.SystemClock.uptimeMillis();
+        if(ambientStageRect==null||now-ambientGeometryUpdatedAt>3500){
+            refreshAmbientStage();
+            if(ambientStageRect==null){scheduleNextAmbient(900);return;}
+        }
+        final android.graphics.Rect stage=new android.graphics.Rect(ambientStageRect);
+        int[] pos=new int[2];web.getLocationInWindow(pos);
+        stage.offset(pos[0],pos[1]);
+        // Capture only the actual game, never the HUD, blur, or letterbox.
+        // If HUD overlaps the game, avoid a recursive contaminated frame.
+        if(panel!=null&&panel.getVisibility()==View.VISIBLE &&
+            android.graphics.Rect.intersects(stage,new android.graphics.Rect(
+                Math.round(panel.getX()),Math.round(panel.getY()),
+                Math.round(panel.getX()+panel.getWidth()),
+                Math.round(panel.getY()+panel.getHeight())))){
+            scheduleNextAmbient(ambientMode==2?500:1100);return;
+        }
+        android.view.Window window=getWindow();
+        android.view.View decor=window.getDecorView();
+        android.graphics.Rect bounds=new android.graphics.Rect(0,0,decor.getWidth(),decor.getHeight());
+        if(!stage.intersect(bounds)||stage.width()<80||stage.height()<60){
+            scheduleNextAmbient(900);return;
+        }
         final int width=256,height=144;
         try{
-            android.graphics.Bitmap target=ambientBuffers[ambientBufferSlot];
-            if(target==null||target.isRecycled()||target.getWidth()!=width||
-               target.getHeight()!=height){
-                target=android.graphics.Bitmap.createBitmap(
+            android.graphics.Bitmap bitmap=ambientBuffers[ambientBufferSlot];
+            if(bitmap==null||bitmap.isRecycled()){
+                bitmap=android.graphics.Bitmap.createBitmap(
                     width,height,android.graphics.Bitmap.Config.RGB_565);
-                ambientBuffers[ambientBufferSlot]=target;
+                ambientBuffers[ambientBufferSlot]=bitmap;
             }
-            final android.graphics.Bitmap ready=target;
+            final android.graphics.Bitmap frame=bitmap;
             final int slot=ambientBufferSlot;
-            int[] location=new int[2];
-            web.getLocationInWindow(location);
-            int captureHeight=Math.min(web.getHeight(),Math.round(web.getWidth()*9f/16f));
-            float centerY=web.getHeight()/2f;
-            if(!landscape&&panel!=null&&Math.abs(panel.getTranslationY())<dp(24))
-                centerY=(web.getHeight()-panel.getHeight())/2f;
-            int top=Math.round(Math.max(0,Math.min(web.getHeight()-captureHeight,
-                centerY-captureHeight/2f)));
-            android.graphics.Rect crop=new android.graphics.Rect(
-                location[0],location[1]+top,
-                location[0]+web.getWidth(),location[1]+top+captureHeight);
-            if(crop.width()<=0||crop.height()<=0){scheduleNextAmbient(650);return;}
-            final long started=android.os.SystemClock.uptimeMillis();
             ambientCopyBusy=true;
-            android.view.PixelCopy.request(getWindow(),crop,ready,result->{
+            long started=android.os.SystemClock.uptimeMillis();
+            android.view.PixelCopy.request(window,stage,frame,result->{
                 ambientCopyBusy=false;
-                if(!ambientForeground||!ambientEnabled||isFinishing()||exiting)return;
-                if(result==android.view.PixelCopy.SUCCESS &&
-                    usableAmbientFrame(ready)){
-                    ambientLastFrame=ready;
-                    if(ambientView==destination)destination.setImageBitmap(ready);
+                if(!ambientEnabled||!ambientForeground||exiting||isFinishing())return;
+                if(result==android.view.PixelCopy.SUCCESS&&usableAmbientFrame(frame)){
+                    ambientLastFrame=frame;
+                    if(ambientView!=null)ambientView.setImageBitmap(frame);
                     ambientBufferSlot=(slot+1)%ambientBuffers.length;
-                }
-                long elapsed=android.os.SystemClock.uptimeMillis()-started;
-                // Maximum ~3 updates/s; back off on slow frames or errors.
-                long delay=result!=android.view.PixelCopy.SUCCESS?1200:
-                    elapsed>120?950:elapsed>55?650:350;
+                    ambientPixelCopyFailures=0;
+                }else ambientPixelCopyFailures++;
+                long duration=android.os.SystemClock.uptimeMillis()-started;
+                long base=ambientMode==2?220:750;
+                long delay=duration>120?Math.max(1200,base):duration>60?
+                    Math.max(800,base):base;
+                if(ambientPixelCopyFailures>3)delay=1800;
                 scheduleNextAmbient(delay);
             },handler);
         }catch(Exception ignored){
             ambientCopyBusy=false;
-            scheduleNextAmbient(1200);
+            scheduleNextAmbient(1800);
         }
     }
     private void chooseAutoHide(){
