@@ -24,21 +24,21 @@ public class MainActivity extends Activity {
     // Live mirror backing the letterbox blur. The frame shown by ImageView
     // must never be modified: render-thread uploads are asynchronous.
     private boolean ambientForeground=false;
-    // PixelCopy samples GPU-composited gameplay asynchronously.
-    // The previous 12 fps WebView.draw() loop blocked the game UI thread.
+    // The backdrop must come exclusively from the WebView, not a PixelCopy
+    // of the app window (which duplicates the native HUD and blur itself).
+    // Capture tiny, low-frequency frames and adapt to observed draw latency.
     private android.graphics.Bitmap ambientLastFrame;
     private final android.graphics.Bitmap[] ambientBuffers=new android.graphics.Bitmap[3];
     private int ambientBufferSlot=0;
-    private boolean ambientCopyBusy=false;
     private boolean ambientGeometryPending=false;
     private android.graphics.Rect ambientStageRect;
     private long ambientGeometryUpdatedAt=0L;
-    private int ambientPixelCopyFailures=0;
+    private int ambientSlowFrames=0;
     private int ambientWebBackground=Integer.MIN_VALUE;
     private boolean exiting=false;
     private final Runnable ambientTick=new Runnable(){public void run(){
         if(!ambientEnabled||!ambientForeground||isFinishing()||exiting)return;
-        if(!ambientCopyBusy)updateAmbient();
+        updateAmbient();
     }};
     private TextView countdown, timerButton, bellBadge;
     private final CompanionChrome.Icon[] viewButtons=new CompanionChrome.Icon[4];
@@ -83,7 +83,9 @@ public class MainActivity extends Activity {
             @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){
                 if(viewport!=null)viewport.onPageStarted();
                 ambientStageRect=null;ambientGeometryUpdatedAt=0;
-                // Retain the last good blur until the new page paints a real frame.
+                ambientLastFrame=null;
+                if(ambientView!=null)ambientView.setImageDrawable(null);
+                // Wait for the newly navigated game scene before capturing.
                 handler.removeCallbacks(ambientTick);
             }
             @Override public void onPageFinished(WebView v,String url){
@@ -358,6 +360,7 @@ public class MainActivity extends Activity {
         ambientView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         ambientView.setVisibility(ambientEnabled?View.VISIBLE:View.GONE);
         if(ambientLastFrame!=null)ambientView.setImageBitmap(ambientLastFrame);
+        ambientView.setAlpha(.67f);
         root.addView(ambientView,new FrameLayout.LayoutParams(-1,-1));
         if(android.os.Build.VERSION.SDK_INT>=31){
             ambientView.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(
@@ -748,7 +751,7 @@ public class MainActivity extends Activity {
             "document.head.appendChild(s);}})();":
             "(function(){var s=document.getElementById('seaf-ambient-transparent');"+
             "if(s)s.remove();})()",null);
-        if(ambientEnabled&&ambientForeground)handler.post(ambientTick);
+        if(ambientEnabled&&ambientForeground)handler.postDelayed(ambientTick,600);
     }
     private boolean usableAmbientFrame(android.graphics.Bitmap image){
         // Reject black/white intermediate WebView frames when Chromium is
@@ -808,64 +811,68 @@ public class MainActivity extends Activity {
     private void updateAmbient(){
         if(!ambientEnabled||!ambientForeground||web==null||ambientView==null||
            ambientView.getVisibility()!=View.VISIBLE||web.getWidth()<1||
-           web.getHeight()<1||ambientCopyBusy)return;
-        if(Build.VERSION.SDK_INT<26){scheduleNextAmbient(1800);return;}
+           web.getHeight()<1||exiting)return;
         long now=android.os.SystemClock.uptimeMillis();
-        if(ambientStageRect==null||now-ambientGeometryUpdatedAt>3500){
+        if(ambientStageRect==null||now-ambientGeometryUpdatedAt>4500){
             refreshAmbientStage();
-            if(ambientStageRect==null){scheduleNextAmbient(900);return;}
+            if(ambientStageRect==null){scheduleNextAmbient(1000);return;}
         }
-        final android.graphics.Rect stage=new android.graphics.Rect(ambientStageRect);
-        int[] pos=new int[2];web.getLocationInWindow(pos);
-        stage.offset(pos[0],pos[1]);
-        // Capture only the actual game, never the HUD, blur, or letterbox.
-        // If HUD overlaps the game, avoid a recursive contaminated frame.
-        if(panel!=null&&panel.getVisibility()==View.VISIBLE &&
-            android.graphics.Rect.intersects(stage,new android.graphics.Rect(
-                Math.round(panel.getX()),Math.round(panel.getY()),
-                Math.round(panel.getX()+panel.getWidth()),
-                Math.round(panel.getY()+panel.getHeight())))){
-            scheduleNextAmbient(ambientMode==2?500:1100);return;
+        // Capture the WebView sub-tree ONLY. Window PixelCopy captures the
+        // native floating toolbar and creates an infinite recursive mirror.
+        android.graphics.Rect area=new android.graphics.Rect(ambientStageRect);
+        if(!area.intersect(0,0,web.getWidth(),web.getHeight())||
+            area.width()<80||area.height()<60){
+            scheduleNextAmbient(1250);return;
         }
-        android.view.Window window=getWindow();
-        android.view.View decor=window.getDecorView();
-        android.graphics.Rect bounds=new android.graphics.Rect(0,0,decor.getWidth(),decor.getHeight());
-        if(!stage.intersect(bounds)||stage.width()<80||stage.height()<60){
-            scheduleNextAmbient(900);return;
+        // Center crop only GAME pixels to a modest 16:9 ambient texture.
+        // Repeated samples of large lettering will be softened by the
+        // blur and reduced opacity rather than amplified.
+        float aspect=16f/9f;
+        float desiredHeight=area.width()/aspect;
+        if(desiredHeight<area.height()){
+            int inset=Math.round((area.height()-desiredHeight)/2f);
+            area.top+=inset;area.bottom-=inset;
+        }else{
+            int newWidth=Math.max(1,Math.round(area.height()*aspect));
+            int inset=Math.max(0,(area.width()-newWidth)/2);
+            area.left+=inset;area.right-=inset;
         }
-        final int width=256,height=144;
+        if(area.width()<40||area.height()<40){scheduleNextAmbient(1200);return;}
+        final int width=192,height=108;
         try{
-            android.graphics.Bitmap bitmap=ambientBuffers[ambientBufferSlot];
-            if(bitmap==null||bitmap.isRecycled()){
-                bitmap=android.graphics.Bitmap.createBitmap(
+            android.graphics.Bitmap buffer=ambientBuffers[ambientBufferSlot];
+            if(buffer==null||buffer.isRecycled()||
+               buffer.getWidth()!=width||buffer.getHeight()!=height){
+                buffer=android.graphics.Bitmap.createBitmap(
                     width,height,android.graphics.Bitmap.Config.RGB_565);
-                ambientBuffers[ambientBufferSlot]=bitmap;
+                ambientBuffers[ambientBufferSlot]=buffer;
             }
-            final android.graphics.Bitmap frame=bitmap;
-            final int slot=ambientBufferSlot;
-            ambientCopyBusy=true;
             long started=android.os.SystemClock.uptimeMillis();
-            android.view.PixelCopy.request(window,stage,frame,result->{
-                ambientCopyBusy=false;
-                if(!ambientEnabled||!ambientForeground||exiting||isFinishing())return;
-                if(result==android.view.PixelCopy.SUCCESS&&usableAmbientFrame(frame)){
-                    ambientLastFrame=frame;
-                    if(ambientView!=null)ambientView.setImageBitmap(frame);
-                    ambientBufferSlot=(slot+1)%ambientBuffers.length;
-                    ambientPixelCopyFailures=0;
-                }else ambientPixelCopyFailures++;
-                long duration=android.os.SystemClock.uptimeMillis()-started;
-                long base=ambientMode==2?220:750;
-                long delay=duration>120?Math.max(1200,base):duration>60?
-                    Math.max(800,base):base;
-                if(ambientPixelCopyFailures>3)delay=1800;
-                scheduleNextAmbient(delay);
-            },handler);
+            android.graphics.Canvas canvas=new android.graphics.Canvas(buffer);
+            canvas.drawColor(0xFF09192B);
+            int save=canvas.save();
+            canvas.scale((float)width/area.width(),(float)height/area.height());
+            canvas.translate(-area.left,-area.top);
+            web.draw(canvas);
+            canvas.restoreToCount(save);
+            long cost=android.os.SystemClock.uptimeMillis()-started;
+            if(usableAmbientFrame(buffer)){
+                ambientLastFrame=buffer;
+                ambientView.setImageBitmap(buffer);
+                // Three textures means the active GPU upload is not overwritten.
+                ambientBufferSlot=(ambientBufferSlot+1)%ambientBuffers.length;
+            }
+            if(cost>90)ambientSlowFrames=Math.min(8,ambientSlowFrames+2);
+            else if(cost>45)ambientSlowFrames=Math.min(8,ambientSlowFrames+1);
+            else ambientSlowFrames=Math.max(0,ambientSlowFrames-1);
+            long base=ambientMode==2?550:1450;
+            // A slow capture should never force the game to render more often.
+            scheduleNextAmbient(base+ambientSlowFrames*600L);
         }catch(Exception ignored){
-            ambientCopyBusy=false;
-            scheduleNextAmbient(1800);
+            scheduleNextAmbient(3500);
         }
     }
+
     private void chooseAutoHide(){
         final int[] values={0,5,10,15,30};
         String[] choices={"Off","5 seconds","10 seconds","15 seconds","30 seconds"};
@@ -930,6 +937,7 @@ public class MainActivity extends Activity {
                 }
                 ambientStageRect=null;
                 ambientGeometryUpdatedAt=0;
+                ambientSlowFrames=0;
                 applyAmbient();d.dismiss();
             }).setNegativeButton("Cancel",null).show();
     }
