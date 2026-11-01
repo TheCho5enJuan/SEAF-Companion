@@ -887,17 +887,181 @@ public class MainActivity extends Activity {
         dialog.setOnDismissListener(d->dialogClosed());
         dialogOpened();dialog.show();
     }
-    private void chooseOpacity(){
-        int old=Math.round(hudOpacity*100);
-        LinearLayout content=new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(24),dp(10),dp(24),dp(8));
-        TextView amount=dialogLabel(old+"%",18);
+    private static final int SETTINGS_MUTED=0xFFAAC5DE;
+    private static final int SETTINGS_LINE=0x557DB0D1;
+
+    private void settingsSection(LinearLayout parent,String text){
+        TextView heading=label(text,11,true);
+        heading.setTextColor(CompanionChrome.CYAN);
+        heading.setLetterSpacing(.10f);
+        LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,dp(34));
+        params.setMargins(dp(4),dp(9),0,0);
+        parent.addView(heading,params);
+    }
+
+    /** A two-line setting with a fixed-width right-hand value for alignment. */
+    private TextView settingsRow(LinearLayout parent,String name,String detail,
+                                 String value,Runnable action){
+        LinearLayout row=new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(13),dp(7),dp(11),dp(7));
+        row.setBackground(CompanionChrome.glass(
+            getResources().getDisplayMetrics().density,false));
+        LinearLayout.LayoutParams outer=new LinearLayout.LayoutParams(-1,dp(66));
+        outer.setMargins(0,0,0,dp(7));
+        parent.addView(row,outer);
+        LinearLayout labels=new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title=label(name,14,true);
+        title.setTextColor(CompanionChrome.WHITE);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        labels.addView(title);
+        TextView subtitle=label(detail,11,false);
+        subtitle.setTextColor(SETTINGS_MUTED);
+        subtitle.setSingleLine(true);
+        subtitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        labels.addView(subtitle);
+        row.addView(labels,new LinearLayout.LayoutParams(0,-1,1));
+        TextView current=label(value,12,true);
+        current.setGravity(Gravity.CENTER_VERTICAL|Gravity.RIGHT);
+        current.setTextColor(CompanionChrome.CYAN);
+        current.setMaxLines(1);
+        current.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        row.addView(current,new LinearLayout.LayoutParams(dp(95),-1));
+        row.setFocusable(true);
+        row.setContentDescription(name+", "+value);
+        row.setOnClickListener(v->action.run());
+        return current;
+    }
+
+    private LinearLayout settingsBody(String title,String subtitle){
+        LinearLayout container=new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setPadding(dp(18),dp(18),dp(18),dp(15));
+        container.setBackground(CompanionChrome.panel(
+            getResources().getDisplayMetrics().density));
+        TextView heading=label(title,19,true);
+        heading.setTextColor(CompanionChrome.WHITE);
+        container.addView(heading);
+        if(subtitle!=null&&!subtitle.isEmpty()){
+            TextView detail=label(subtitle,12,false);
+            detail.setTextColor(SETTINGS_MUTED);
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(28));
+            container.addView(detail,lp);
+        }
+        View rule=new View(this);
+        rule.setBackgroundColor(SETTINGS_LINE);
+        LinearLayout.LayoutParams line=new LinearLayout.LayoutParams(-1,dp(1));
+        line.setMargins(0,dp(8),0,dp(3));
+        container.addView(rule,line);
+        return container;
+    }
+
+    private AlertDialog showSettingsPanel(LinearLayout content){
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.addView(content);
+        AlertDialog dialog=new AlertDialog.Builder(this).create();
+        dialog.setView(scroll);
+        dialog.setOnDismissListener(d->dialogClosed());
+        dialogOpened();
+        dialog.show();
+        Window window=dialog.getWindow();
+        if(window!=null){
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            int width=Math.min(dp(430),getResources().getDisplayMetrics().widthPixels-dp(24));
+            int height=Math.min(dp(650),getResources().getDisplayMetrics().heightPixels-dp(90));
+            window.setLayout(width,height);
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            WindowManager.LayoutParams attributes=window.getAttributes();
+            attributes.dimAmount=.56f;
+            window.setAttributes(attributes);
+        }
+        return dialog;
+    }
+
+    private void settingsFooter(LinearLayout body,Runnable close){
+        TextView done=label("Done",14,true);
+        done.setGravity(Gravity.CENTER);
+        done.setTextColor(CompanionChrome.CYAN);
+        done.setBackground(CompanionChrome.glass(
+            getResources().getDisplayMetrics().density,false));
+        done.setOnClickListener(v->close.run());
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(44));
+        lp.setMargins(0,dp(8),0,dp(2));
+        body.addView(done,lp);
+    }
+
+    private interface SettingsSelection {void selected(int value);}
+    private void settingsChoices(String title,String[] names,String[] captions,
+                                 int selected,SettingsSelection callback){
+        LinearLayout body=settingsBody(title,"Choose one option");
+        final AlertDialog[] box={null};
+        settingsSection(body,"AVAILABLE OPTIONS");
+        for(int i=0;i<names.length;i++){
+            final int index=i;
+            settingsRow(body,names[i],captions[i],selected==i?"✓":"",
+                ()->{box[0].dismiss();callback.selected(index);});
+        }
+        settingsFooter(body,()->box[0].dismiss());
+        box[0]=showSettingsPanel(body);
+    }
+
+    private String orientationName(){
+        int mode=getPreferences(0).getInt("orientationMode",0);
+        return mode==1?"Portrait":mode==2?"Landscape":"Auto";
+    }
+    private String ambientName(){
+        return ambientMode==0?"Off":ambientMode==2?"Smooth":"Balanced";
+    }
+    private void chooseOrientation(Runnable refreshed){
+        settingsChoices("Screen orientation",
+            new String[]{"Auto rotate","Portrait","Landscape"},
+            new String[]{"Follow your device","Keep the game vertical",
+                "Keep the game horizontal"},
+            getPreferences(0).getInt("orientationMode",0),
+            choice->{applyOrientation(choice);refreshed.run();});
+    }
+    private void chooseAmbientMode(Runnable refreshed){
+        settingsChoices("Ambient background",
+            new String[]{"Off","Balanced","Smooth"},
+            new String[]{"Classic black letterboxing",
+                "Lower resource use","More frequent background updates"},
+            ambientMode,choice->{
+                ambientMode=choice;
+                ambientEnabled=choice!=0;
+                getPreferences(0).edit().putInt("ambientBlurMode",choice)
+                    .putBoolean("ambientBlurEnabled",ambientEnabled).apply();
+                if(ambientView!=null&&Build.VERSION.SDK_INT>=31){
+                    float radius=choice==2?38f:29f;
+                    ambientView.setRenderEffect(
+                        android.graphics.RenderEffect.createBlurEffect(
+                            radius,radius,android.graphics.Shader.TileMode.CLAMP));
+                }
+                ambientStageRect=null;
+                ambientGeometryUpdatedAt=0;
+                ambientSlowFrames=0;
+                applyAmbient();
+                refreshed.run();
+            });
+    }
+    private void chooseOpacity(Runnable refreshed){
+        int before=Math.round(hudOpacity*100);
+        LinearLayout body=settingsBody("Companion opacity",
+            "Adjust the transparency of the floating controls");
+        TextView amount=label(before+"%",25,true);
         amount.setGravity(Gravity.CENTER);
-        content.addView(amount);
+        LinearLayout.LayoutParams amountLp=new LinearLayout.LayoutParams(-1,dp(54));
+        body.addView(amount,amountLp);
         SeekBar slider=new SeekBar(this);
-        slider.setMax(80);slider.setProgress(old-20);
-        content.addView(slider);
+        slider.setMax(80);
+        slider.setProgress(before-20);
+        slider.setProgressTintList(android.content.res.ColorStateList.valueOf(CompanionChrome.CYAN));
+        slider.setThumbTintList(android.content.res.ColorStateList.valueOf(CompanionChrome.CYAN));
+        body.addView(slider,new LinearLayout.LayoutParams(-1,dp(55)));
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
             public void onProgressChanged(SeekBar bar,int progress,boolean user){
                 int value=progress+20;
@@ -907,89 +1071,83 @@ public class MainActivity extends Activity {
             public void onStartTrackingTouch(SeekBar bar){}
             public void onStopTrackingTouch(SeekBar bar){}
         });
-        AlertDialog dialog=new AlertDialog.Builder(this)
-            .setTitle("Overlay opacity").setView(content)
-            .setPositiveButton("Save",(d,which)->getPreferences(0).edit()
-                .putInt(HUD_OPACITY,slider.getProgress()+20).apply())
-            .setNegativeButton("Cancel",(d,which)->setHudOpacity(old/100f)).create();
-        dialog.setOnCancelListener(d->setHudOpacity(old/100f));
-        dialog.setOnDismissListener(d->dialogClosed());
-        dialogOpened();dialog.show();
+        final AlertDialog[] dialog={null};
+        settingsRow(body,"Save changes","Apply this opacity","Save",()->{
+            int value=slider.getProgress()+20;
+            getPreferences(0).edit().putInt(HUD_OPACITY,value).apply();
+            refreshed.run();
+            dialog[0].dismiss();
+        });
+        settingsRow(body,"Cancel","Restore previous value","",()->{
+            setHudOpacity(before/100f);
+            refreshed.run();
+            dialog[0].dismiss();
+        });
+        dialog[0]=showSettingsPanel(body);
+        dialog[0].setOnCancelListener(d->{setHudOpacity(before/100f);refreshed.run();});
     }
-    private void chooseAmbientMode(){
-        final String[] options={
-            "Off — original black background",
-            "Balanced — less GPU use, adaptive updates",
-            "Smooth — quicker live background updates"
-        };
-        new AlertDialog.Builder(this).setTitle("Ambient background blur")
-            .setSingleChoiceItems(options,ambientMode,(d,chosen)->{
-                ambientMode=chosen;
-                ambientEnabled=chosen!=0;
-                getPreferences(0).edit()
-                    .putInt("ambientBlurMode",chosen)
-                    .putBoolean("ambientBlurEnabled",ambientEnabled).apply();
-                if(ambientView!=null&&Build.VERSION.SDK_INT>=31){
-                    float radius=chosen==2?38f:29f;
-                    ambientView.setRenderEffect(
-                        android.graphics.RenderEffect.createBlurEffect(
-                            radius,radius,android.graphics.Shader.TileMode.CLAMP));
-                }
-                ambientStageRect=null;
-                ambientGeometryUpdatedAt=0;
-                ambientSlowFrames=0;
-                applyAmbient();d.dismiss();
-            }).setNegativeButton("Cancel",null).show();
+
+    private void openNotificationSound(){
+        try{
+            Intent i=new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS);
+            i.putExtra(Settings.EXTRA_APP_PACKAGE,getPackageName());
+            i.putExtra(Settings.EXTRA_CHANNEL_ID,TimerReceiver.CHANNEL_ID);
+            startActivity(i);
+        }catch(Exception ex){openAppSettings();}
     }
+
     private void showSettings(){
-        SharedPreferences prefs=getPreferences(0);
-        int auto=prefs.getInt(AUTO_HIDE,0);
-        String[] opts={"Original game mode","Auto rotate","Lock portrait","Lock landscape",
-            "Toggle fullscreen","Remember zoom: "+(prefs.getBoolean("rememberZoom",true)?"On":"Off"),
-            "Auto center: "+(prefs.getBoolean("autoCenter",true)?"On":"Off"),
-            "Mission notification sound","Android battery settings","Refresh game","Open game in browser",
-            "Ambient blur: "+(ambientMode==0?"Off":ambientMode==2?"Smooth":"Balanced"),
-            "Remember position: "+(prefs.getBoolean(REMEMBER_HUD,true)?"On":"Off"),
-            "Edge snapping: "+(prefs.getBoolean(EDGE_SNAP,false)?"On":"Off"),
-            "Auto-hide: "+(auto==0?"Off":auto+" seconds"),
-            "Overlay opacity: "+Math.round(hudOpacity*100)+"%"};
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("SEAF Companion Settings")
-          .setItems(opts,(d,which)->{
-              switch(which){
-                case 0:setOriginal(true);break;
-                case 1:applyOrientation(0);break;
-                case 2:applyOrientation(1);break;
-                case 3:applyOrientation(2);break;
-                case 4:setFullscreen(!fullscreen);break;
-                case 5:viewport.setRememberZoom(!prefs.getBoolean("rememberZoom",true));break;
-                case 6:viewport.setAutoCenter(!prefs.getBoolean("autoCenter",true));break;
-                case 7:try{
-                    Intent i=new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS);
-                    i.putExtra(Settings.EXTRA_APP_PACKAGE,getPackageName());
-                    i.putExtra(Settings.EXTRA_CHANNEL_ID,TimerReceiver.CHANNEL_ID);startActivity(i);
-                }catch(Exception ex){openAppSettings();}break;
-                case 8:openAppSettings();break;
-                case 9:web.reload();break;
-                case 10:startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(
-                    web.getUrl()==null?"https://seaf.se/":web.getUrl())));break;
-                case 11:chooseAmbientMode();break;
-                case 12:
-                    boolean remember=!prefs.getBoolean(REMEMBER_HUD,true);
-                    SharedPreferences.Editor editor=prefs.edit().putBoolean(REMEMBER_HUD,remember);
-                    if(!remember)editor.remove("portraitBarOffsetXDp").remove("portraitBarOffsetDp")
-                        .remove("landscapeBarOffsetXDp").remove("landscapeBarOffsetDp");
-                    editor.apply();
-                    if(panel!=null)updatePanelPosition();
-                    break;
-                case 13:prefs.edit().putBoolean(EDGE_SNAP,
-                    !prefs.getBoolean(EDGE_SNAP,false)).apply();break;
-                case 14:chooseAutoHide();break;
-                case 15:chooseOpacity();break;
-              }
-          }).setNegativeButton("Close",null).create();
-        dialog.setOnDismissListener(d->dialogClosed());
-        dialogOpened();dialog.show();
+        LinearLayout body=settingsBody("SEAF Companion","Display and reminders");
+        settingsSection(body,"DISPLAY");
+        final TextView[] orientation={null};
+        orientation[0]=settingsRow(body,"Orientation","Screen rotation",
+            orientationName(),()->chooseOrientation(
+                ()->orientation[0].setText(orientationName())));
+        final TextView[] ambient={null};
+        ambient[0]=settingsRow(body,"Ambient blur","Background around the game",
+            ambientName(),()->chooseAmbientMode(
+                ()->ambient[0].setText(ambientName())));
+        final TextView[] opacity={null};
+        opacity[0]=settingsRow(body,"Panel opacity","Floating toolbar transparency",
+            Math.round(hudOpacity*100)+"%",()->chooseOpacity(
+                ()->opacity[0].setText(Math.round(hudOpacity*100)+"%")));
+        settingsSection(body,"REMINDERS");
+        settingsRow(body,"Notification sound","Change the reminder alert in Android",
+            "Open",this::openNotificationSound);
+        settingsSection(body,"MORE");
+        settingsRow(body,"Advanced","Original game, refresh, app permissions",
+            "View",this::showAdvancedSettings);
+        final AlertDialog[] dialog={null};
+        settingsFooter(body,()->dialog[0].dismiss());
+        dialog[0]=showSettingsPanel(body);
     }
+
+    private void showAdvancedSettings(){
+        LinearLayout body=settingsBody("Advanced options","Tools for troubleshooting");
+        settingsSection(body,"GAME");
+        final AlertDialog[] dialog={null};
+        settingsRow(body,"Original game view",
+            "Disable Companion fitting; tap Companion to return",
+            original?"On":"Off",()->{
+                dialog[0].dismiss();
+                setOriginal(!original);
+            });
+        settingsRow(body,"Reload game","Refresh SEAF without reinstalling",
+            "Reload",()->new AlertDialog.Builder(this)
+                .setTitle("Reload the game?")
+                .setMessage("This may interrupt the current mission screen.")
+                .setNegativeButton("Cancel",null)
+                .setPositiveButton("Reload",(d,w)->web.reload()).show());
+        settingsSection(body,"DEVICE");
+        settingsRow(body,"App permissions","Notifications and battery usage",
+            "Open",this::openAppSettings);
+        settingsRow(body,"Open in browser","Fallback for external login",
+            "Open",()->startActivity(new Intent(Intent.ACTION_VIEW,
+                Uri.parse(web.getUrl()==null?"https://seaf.se/":web.getUrl()))));
+        settingsFooter(body,()->dialog[0].dismiss());
+        dialog[0]=showSettingsPanel(body);
+    }
+
     private void openAppSettings(){
         Intent i=new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
         i.setData(Uri.parse("package:"+getPackageName()));startActivity(i);
