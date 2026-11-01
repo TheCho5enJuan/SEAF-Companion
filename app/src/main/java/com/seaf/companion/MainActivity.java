@@ -312,13 +312,27 @@ public class MainActivity extends Activity {
         try{web.evaluateJavascript(RESUME_GAME_AUDIO,null);}catch(Exception ignored){}
     }
     private void closeCompanion(){
-        handler.removeCallbacks(ambientTick);
-        handler.removeCallbacks(autoHideTask);
-        handler.removeCallbacks(clock);
-        pauseGameAudio();
-        try{web.stopLoading();web.loadUrl("about:blank");}catch(Exception ignored){}
-        try{CookieManager.getInstance().flush();}catch(Exception ignored){}
-        finishAndRemoveTask();
+        new AlertDialog.Builder(this)
+            .setTitle("Close SEAF Companion?")
+            .setMessage("The game will close and audio will stop. Your scheduled mission reminder stays active.")
+            .setNegativeButton("Keep Playing",null)
+            .setPositiveButton("Close Game",(dialog,which)->{
+                if(exiting)return;
+                exiting=true;
+                ambientForeground=false;
+                handler.removeCallbacks(ambientTick);
+                handler.removeCallbacks(autoHideTask);
+                handler.removeCallbacks(clock);
+                pauseGameAudio();
+                try{web.stopLoading();CookieManager.getInstance().flush();}
+                catch(Exception ignored){}
+                if(root!=null)root.animate().alpha(0f).setDuration(180)
+                    .withEndAction(()->{
+                        try{web.loadUrl("about:blank");}catch(Exception ignored){}
+                        finishAndRemoveTask();
+                    }).start();
+                else finishAndRemoveTask();
+            }).show();
     }
     private void build(){
         handler.removeCallbacks(autoHideTask);
@@ -374,6 +388,9 @@ public class MainActivity extends Activity {
                 View separator=new View(this);separator.setBackgroundColor(0x8875B5DB);
                 LinearLayout.LayoutParams divider=new LinearLayout.LayoutParams(dp(1),dp(30));
                 divider.setMargins(dp(2),0,dp(2),0);bar.addView(separator,divider);
+                CompanionChrome.Icon close=iconButton("close","Close SEAF Companion",
+                    this::closeCompanion);
+                makeDraggable(close);addIcon(bar,close,1);
                 FrameLayout bell=new FrameLayout(this);
                 CompanionChrome.Icon bellIcon=iconButton("bell","Mission reminder",this::showTimer);
                 bell.addView(bellIcon,new FrameLayout.LayoutParams(-1,-1));
@@ -390,9 +407,6 @@ public class MainActivity extends Activity {
                             .putBoolean("expanded",expanded).apply();build();
                     });
                 makeDraggable(exp);addIcon(bar,exp,1);
-                CompanionChrome.Icon close=iconButton("close","Close SEAF Companion",
-                    this::closeCompanion);
-                makeDraggable(close);addIcon(bar,close,1);
             }else{
                 CompanionChrome.Icon expand=iconButton(expanded?"collapse":"expand",
                     expanded?"Collapse":"Expand",()->{
