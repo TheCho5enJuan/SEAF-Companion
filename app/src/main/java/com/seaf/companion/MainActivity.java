@@ -23,17 +23,17 @@ public class MainActivity extends Activity {
     // Live mirror backing the letterbox blur. The frame shown by ImageView
     // must never be modified: render-thread uploads are asynchronous.
     private boolean ambientForeground=false;
-    private android.graphics.Bitmap ambientScratch;
+    // PixelCopy samples GPU-composited gameplay asynchronously.
+    // The previous 12 fps WebView.draw() loop blocked the game UI thread.
     private android.graphics.Bitmap ambientLastFrame;
+    private final android.graphics.Bitmap[] ambientBuffers=new android.graphics.Bitmap[3];
+    private int ambientBufferSlot=0;
+    private boolean ambientCopyBusy=false;
     private int ambientWebBackground=Integer.MIN_VALUE;
+    private boolean exiting=false;
     private final Runnable ambientTick=new Runnable(){public void run(){
-        if(!ambientEnabled||!ambientForeground||isFinishing())return;
-        long started=android.os.SystemClock.uptimeMillis();
-        updateAmbient();
-        long cost=android.os.SystemClock.uptimeMillis()-started;
-        // Keep the backdrop live, but avoid excessive UI-thread contention.
-        long target=cost>35?200:cost>18?120:83;
-        handler.postDelayed(this,Math.max(16,target-cost));
+        if(!ambientEnabled||!ambientForeground||isFinishing()||exiting)return;
+        if(!ambientCopyBusy)updateAmbient();
     }};
     private TextView countdown, timerButton, bellBadge;
     private final CompanionChrome.Icon[] viewButtons=new CompanionChrome.Icon[4];
@@ -740,41 +740,60 @@ public class MainActivity extends Activity {
             }
         return lit>Math.max(5,total/80)&&white<total*0.92f;
     }
+    private void scheduleNextAmbient(long milliseconds){
+        handler.removeCallbacks(ambientTick);
+        if(ambientEnabled&&ambientForeground&&!isFinishing()&&!exiting)
+            handler.postDelayed(ambientTick,milliseconds);
+    }
     private void updateAmbient(){
         if(!ambientEnabled||!ambientForeground||web==null||ambientView==null||
-           ambientView.getVisibility()!=View.VISIBLE||
-           web.getWidth()<1||web.getHeight()<1)return;
+           ambientView.getVisibility()!=View.VISIBLE||web.getWidth()<1||
+           web.getHeight()<1||ambientCopyBusy)return;
+        if(Build.VERSION.SDK_INT<26){scheduleNextAmbient(1500);return;}
+        final ImageView destination=ambientView;
+        final int width=256,height=144;
         try{
-            // Sample the game without resizing the on-screen WebView. This
-            // inexpensive bitmap is only an offscreen capture buffer.
-            final int width=256,height=144;
-            if(ambientScratch==null||ambientScratch.getWidth()!=width||
-                ambientScratch.getHeight()!=height)
-                ambientScratch=android.graphics.Bitmap.createBitmap(
+            android.graphics.Bitmap target=ambientBuffers[ambientBufferSlot];
+            if(target==null||target.isRecycled()||target.getWidth()!=width||
+               target.getHeight()!=height){
+                target=android.graphics.Bitmap.createBitmap(
                     width,height,android.graphics.Bitmap.Config.RGB_565);
-            float sourceWidth=web.getWidth();
-            float sourceHeight=Math.min(web.getHeight(),sourceWidth*height/width);
-            if(sourceHeight<1)return;
+                ambientBuffers[ambientBufferSlot]=target;
+            }
+            final android.graphics.Bitmap ready=target;
+            final int slot=ambientBufferSlot;
+            int[] location=new int[2];
+            web.getLocationInWindow(location);
+            int captureHeight=Math.min(web.getHeight(),Math.round(web.getWidth()*9f/16f));
             float centerY=web.getHeight()/2f;
             if(!landscape&&panel!=null&&Math.abs(panel.getTranslationY())<dp(24))
                 centerY=(web.getHeight()-panel.getHeight())/2f;
-            float top=Math.max(0,Math.min(web.getHeight()-sourceHeight,
-                centerY-sourceHeight/2f));
-            android.graphics.Canvas capture=new android.graphics.Canvas(ambientScratch);
-            capture.drawColor(Color.BLACK);
-            capture.scale(width/sourceWidth,height/sourceHeight);
-            capture.translate(0,-top);
-            web.draw(capture);
-            if(!usableAmbientFrame(ambientScratch))return;
-            // Copy to a NEVER-mutated frame. Reusing a displayed bitmap caused
-            // the renderer to read pixels while the next capture wrote them.
-            android.graphics.Bitmap ready=ambientScratch.copy(
-                android.graphics.Bitmap.Config.RGB_565,false);
-            if(ready==null)return;
-            ambientLastFrame=ready;
-            ambientView.setImageBitmap(ready);
+            int top=Math.round(Math.max(0,Math.min(web.getHeight()-captureHeight,
+                centerY-captureHeight/2f)));
+            android.graphics.Rect crop=new android.graphics.Rect(
+                location[0],location[1]+top,
+                location[0]+web.getWidth(),location[1]+top+captureHeight);
+            if(crop.width()<=0||crop.height()<=0){scheduleNextAmbient(650);return;}
+            final long started=android.os.SystemClock.uptimeMillis();
+            ambientCopyBusy=true;
+            android.view.PixelCopy.request(getWindow(),crop,ready,result->{
+                ambientCopyBusy=false;
+                if(!ambientForeground||!ambientEnabled||isFinishing()||exiting)return;
+                if(result==android.view.PixelCopy.SUCCESS &&
+                    usableAmbientFrame(ready)){
+                    ambientLastFrame=ready;
+                    if(ambientView==destination)destination.setImageBitmap(ready);
+                    ambientBufferSlot=(slot+1)%ambientBuffers.length;
+                }
+                long elapsed=android.os.SystemClock.uptimeMillis()-started;
+                // Maximum ~3 updates/s; back off on slow frames or errors.
+                long delay=result!=android.view.PixelCopy.SUCCESS?1200:
+                    elapsed>120?950:elapsed>55?650:350;
+                scheduleNextAmbient(delay);
+            },handler);
         }catch(Exception ignored){
-            // Keep the last good frame rather than flashing black on failure.
+            ambientCopyBusy=false;
+            scheduleNextAmbient(1200);
         }
     }
     private void chooseAutoHide(){
