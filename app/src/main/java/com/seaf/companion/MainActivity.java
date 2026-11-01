@@ -607,13 +607,13 @@ public class MainActivity extends Activity {
         body.addView(select,new LinearLayout.LayoutParams(-1,dp(29)));
 
         final int[] chosen={0};
-        final TextView[] presets=new TextView[4];
+        final TextView[] presets=new TextView[5];
         final EditText custom=new EditText(this);
-        final int[] values={5,15,30,60};
+        final int[] values={5,15,30,60,120};
         LinearLayout options=new LinearLayout(this);
-        for(int i=0;i<4;i++){
+        for(int i=0;i<values.length;i++){
             final int which=i;
-            TextView button=label(new String[]{"5m","15m","30m","1h"}[i],15,true);
+            TextView button=label(new String[]{"5m","15m","30m","1h","2h"}[i],15,true);
             button.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(49),1);
             lp.setMargins(dp(2),0,dp(2),0);
@@ -621,7 +621,7 @@ public class MainActivity extends Activity {
             presets[i]=button;
             button.setOnClickListener(v->{
                 chosen[0]=values[which];
-                for(int j=0;j<4;j++)
+                for(int j=0;j<values.length;j++)
                     presets[j].setBackground(CompanionChrome.glass(
                         getResources().getDisplayMetrics().density,j==which));
                 custom.setText("");
@@ -667,7 +667,7 @@ public class MainActivity extends Activity {
         chosen[0]=matched>=0?savedMinutes:0;
         if(active!=null&&savedMinutes>0&&matched<0)
             custom.setText(Integer.toString(savedMinutes));
-        for(int j=0;j<4;j++)
+        for(int j=0;j<values.length;j++)
             presets[j].setBackground(CompanionChrome.glass(
                 getResources().getDisplayMetrics().density,j==matched));
 
