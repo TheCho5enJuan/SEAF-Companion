@@ -20,6 +20,7 @@ public class MainActivity extends Activity {
     private LinearLayout panel;
     private ImageView ambientView;
     private boolean ambientEnabled;
+    private int ambientMode; // 0=Off, 1=Balanced, 2=Smooth
     // Live mirror backing the letterbox blur. The frame shown by ImageView
     // must never be modified: render-thread uploads are asynchronous.
     private boolean ambientForeground=false;
@@ -29,6 +30,10 @@ public class MainActivity extends Activity {
     private final android.graphics.Bitmap[] ambientBuffers=new android.graphics.Bitmap[3];
     private int ambientBufferSlot=0;
     private boolean ambientCopyBusy=false;
+    private boolean ambientGeometryPending=false;
+    private android.graphics.Rect ambientStageRect;
+    private long ambientGeometryUpdatedAt=0L;
+    private int ambientPixelCopyFailures=0;
     private int ambientWebBackground=Integer.MIN_VALUE;
     private boolean exiting=false;
     private final Runnable ambientTick=new Runnable(){public void run(){
@@ -60,7 +65,9 @@ public class MainActivity extends Activity {
         expanded=getPreferences(0).getBoolean("expanded",false);
         original=getPreferences(0).getBoolean("originalMode",false);
         fullscreen=getPreferences(0).getBoolean("fullscreenMode",false);
-        ambientEnabled=getPreferences(0).getBoolean("ambientBlurEnabled",false);
+        ambientMode=getPreferences(0).getInt("ambientBlurMode",
+            getPreferences(0).getBoolean("ambientBlurEnabled",false)?1:0);
+        ambientEnabled=ambientMode!=0;
         hudOpacity=Math.max(.2f,Math.min(1f,getPreferences(0).getInt(HUD_OPACITY,100)/100f));
         web=new WebView(this);
         WebSettings s=web.getSettings();
@@ -75,6 +82,7 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient(){
             @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){
                 if(viewport!=null)viewport.onPageStarted();
+                ambientStageRect=null;ambientGeometryUpdatedAt=0;
                 // Retain the last good blur until the new page paints a real frame.
                 handler.removeCallbacks(ambientTick);
             }
@@ -345,6 +353,7 @@ public class MainActivity extends Activity {
         if(viewport.getParent()!=null)((android.view.ViewGroup)viewport.getParent()).removeView(viewport);
         root=new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
+        ambientStageRect=null;ambientGeometryUpdatedAt=0;
         ambientView=new ImageView(this);
         ambientView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         ambientView.setVisibility(ambientEnabled?View.VISIBLE:View.GONE);
@@ -352,7 +361,8 @@ public class MainActivity extends Activity {
         root.addView(ambientView,new FrameLayout.LayoutParams(-1,-1));
         if(android.os.Build.VERSION.SDK_INT>=31){
             ambientView.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(
-                36f,36f,android.graphics.Shader.TileMode.CLAMP));
+                ambientMode==2?38f:29f,ambientMode==2?38f:29f,
+                android.graphics.Shader.TileMode.CLAMP));
         }
         root.addView(viewport,new FrameLayout.LayoutParams(-1,-1));
         viewport.setModes(landscape,original,(!landscape&&!original)?(expanded?162:66):0);
@@ -853,6 +863,30 @@ public class MainActivity extends Activity {
         dialog.setOnDismissListener(d->dialogClosed());
         dialogOpened();dialog.show();
     }
+    private void chooseAmbientMode(){
+        final String[] options={
+            "Off — original black background",
+            "Balanced — less GPU use, adaptive updates",
+            "Smooth — quicker live background updates"
+        };
+        new AlertDialog.Builder(this).setTitle("Ambient background blur")
+            .setSingleChoiceItems(options,ambientMode,(d,chosen)->{
+                ambientMode=chosen;
+                ambientEnabled=chosen!=0;
+                getPreferences(0).edit()
+                    .putInt("ambientBlurMode",chosen)
+                    .putBoolean("ambientBlurEnabled",ambientEnabled).apply();
+                if(ambientView!=null&&Build.VERSION.SDK_INT>=31){
+                    float radius=chosen==2?38f:29f;
+                    ambientView.setRenderEffect(
+                        android.graphics.RenderEffect.createBlurEffect(
+                            radius,radius,android.graphics.Shader.TileMode.CLAMP));
+                }
+                ambientStageRect=null;
+                ambientGeometryUpdatedAt=0;
+                applyAmbient();d.dismiss();
+            }).setNegativeButton("Cancel",null).show();
+    }
     private void showSettings(){
         SharedPreferences prefs=getPreferences(0);
         int auto=prefs.getInt(AUTO_HIDE,0);
@@ -860,7 +894,7 @@ public class MainActivity extends Activity {
             "Toggle fullscreen","Remember zoom: "+(prefs.getBoolean("rememberZoom",true)?"On":"Off"),
             "Auto center: "+(prefs.getBoolean("autoCenter",true)?"On":"Off"),
             "Mission notification sound","Android battery settings","Refresh game","Open game in browser",
-            "Live ambient blur: "+(ambientEnabled?"On":"Off"),
+            "Ambient blur: "+(ambientMode==0?"Off":ambientMode==2?"Smooth":"Balanced"),
             "Remember position: "+(prefs.getBoolean(REMEMBER_HUD,true)?"On":"Off"),
             "Edge snapping: "+(prefs.getBoolean(EDGE_SNAP,false)?"On":"Off"),
             "Auto-hide: "+(auto==0?"Off":auto+" seconds"),
@@ -884,9 +918,7 @@ public class MainActivity extends Activity {
                 case 9:web.reload();break;
                 case 10:startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(
                     web.getUrl()==null?"https://seaf.se/":web.getUrl())));break;
-                case 11:ambientEnabled=!ambientEnabled;
-                    prefs.edit().putBoolean("ambientBlurEnabled",ambientEnabled).apply();
-                    applyAmbient();break;
+                case 11:chooseAmbientMode();break;
                 case 12:
                     boolean remember=!prefs.getBoolean(REMEMBER_HUD,true);
                     SharedPreferences.Editor editor=prefs.edit().putBoolean(REMEMBER_HUD,remember);
