@@ -398,6 +398,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(-1,dp(23));
         tp.setMargins(0,dp(3),0,0);
         item.addView(text,tp);
+        item.setOnClickListener(v->icon.performClick());
         makeDraggable(icon);
         makeDraggable(item);
     }
@@ -484,6 +485,7 @@ public class MainActivity extends Activity {
                 TextView bellLabel=label("REMIND",8,true);
                 bellLabel.setGravity(Gravity.CENTER);bellLabel.setTextColor(0xFFE5F3FF);
                 bellColumn.addView(bellLabel,new LinearLayout.LayoutParams(-1,dp(23)));
+                bellColumn.setOnClickListener(v->bellIcon.performClick());
                 makeDraggable(bellColumn);
                 addReferenceDockIcon(bar,iconButton("settings","Settings",this::showSettings),"SETTINGS");
                 addReferenceDockIcon(bar,iconButton("orientation","Rotate",this::toggleOrientation),"ROTATE");
