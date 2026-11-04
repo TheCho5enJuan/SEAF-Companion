@@ -18,7 +18,8 @@ public class MainActivity extends Activity {
     private GameViewport viewport;
     private FrameLayout root;
     private LinearLayout panel;
-    private ImageView ambientView;
+    private AmbientGlowView ambientView;
+    private View gameOutline;
     private boolean ambientEnabled;
     private int ambientMode; // 0=Off, 1=Balanced, 2=Smooth
     // Live mirror backing the letterbox blur. The frame shown by ImageView
@@ -66,7 +67,7 @@ public class MainActivity extends Activity {
         original=getPreferences(0).getBoolean("originalMode",false);
         fullscreen=getPreferences(0).getBoolean("fullscreenMode",false);
         ambientMode=getPreferences(0).getInt("ambientBlurMode",
-            getPreferences(0).getBoolean("ambientBlurEnabled",false)?1:0);
+            getPreferences(0).getBoolean("ambientBlurEnabled",true)?1:0);
         ambientEnabled=ambientMode!=0;
         hudOpacity=Math.max(.2f,Math.min(1f,getPreferences(0).getInt(HUD_OPACITY,100)/100f));
         web=new WebView(this);
@@ -84,7 +85,7 @@ public class MainActivity extends Activity {
                 if(viewport!=null)viewport.onPageStarted();
                 ambientStageRect=null;ambientGeometryUpdatedAt=0;
                 ambientLastFrame=null;
-                if(ambientView!=null)ambientView.setImageDrawable(null);
+                if(ambientView!=null)ambientView.invalidate();
                 // Wait for the newly navigated game scene before capturing.
                 handler.removeCallbacks(ambientTick);
             }
@@ -354,19 +355,13 @@ public class MainActivity extends Activity {
         java.util.Arrays.fill(viewButtons,null);
         if(viewport.getParent()!=null)((android.view.ViewGroup)viewport.getParent()).removeView(viewport);
         root=new FrameLayout(this);
-        root.setBackgroundColor(Color.BLACK);
+        root.setBackgroundColor(0xFF050A16);
         ambientStageRect=null;ambientGeometryUpdatedAt=0;
-        ambientView=new ImageView(this);
-        ambientView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        ambientView=new AmbientGlowView(this);
         ambientView.setVisibility(ambientEnabled?View.VISIBLE:View.GONE);
-        if(ambientLastFrame!=null)ambientView.setImageBitmap(ambientLastFrame);
-        ambientView.setAlpha(.67f);
+        if(ambientLastFrame!=null)ambientView.acceptSample(ambientLastFrame);
+        ambientView.setAlpha(1f);
         root.addView(ambientView,new FrameLayout.LayoutParams(-1,-1));
-        if(android.os.Build.VERSION.SDK_INT>=31){
-            ambientView.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(
-                ambientMode==2?38f:29f,ambientMode==2?38f:29f,
-                android.graphics.Shader.TileMode.CLAMP));
-        }
         root.addView(viewport,new FrameLayout.LayoutParams(-1,-1));
         viewport.setModes(landscape,original,(!landscape&&!original)?(expanded?162:66):0);
         if(!original){
@@ -858,7 +853,7 @@ public class MainActivity extends Activity {
             long cost=android.os.SystemClock.uptimeMillis()-started;
             if(usableAmbientFrame(buffer)){
                 ambientLastFrame=buffer;
-                ambientView.setImageBitmap(buffer);
+                ambientView.acceptSample(buffer);
                 // Three textures means the active GPU upload is not overwritten.
                 ambientBufferSlot=(ambientBufferSlot+1)%ambientBuffers.length;
             }
@@ -1035,12 +1030,6 @@ public class MainActivity extends Activity {
                 ambientEnabled=choice!=0;
                 getPreferences(0).edit().putInt("ambientBlurMode",choice)
                     .putBoolean("ambientBlurEnabled",ambientEnabled).apply();
-                if(ambientView!=null&&Build.VERSION.SDK_INT>=31){
-                    float radius=choice==2?38f:29f;
-                    ambientView.setRenderEffect(
-                        android.graphics.RenderEffect.createBlurEffect(
-                            radius,radius,android.graphics.Shader.TileMode.CLAMP));
-                }
                 ambientStageRect=null;
                 ambientGeometryUpdatedAt=0;
                 ambientSlowFrames=0;
