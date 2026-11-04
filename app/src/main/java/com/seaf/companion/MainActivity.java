@@ -34,6 +34,7 @@ public class MainActivity extends Activity {
     private boolean ambientGeometryPending=false;
     private android.graphics.Rect ambientStageRect;
     private long ambientGeometryUpdatedAt=0L;
+    private long followFrameUntil=0L;
     private int ambientSlowFrames=0;
     private int ambientWebBackground=Integer.MIN_VALUE;
     private boolean exiting=false;
@@ -568,6 +569,7 @@ public class MainActivity extends Activity {
         // frame after the WebView finishes applying the new preset.
         ambientStageRect=null;
         ambientGeometryUpdatedAt=0;
+        followFrameUntil=android.os.SystemClock.uptimeMillis()+1100;
         if(gameOutline!=null)gameOutline.setVisibility(View.GONE);
         if(index==3)viewport.showOverview();
         else viewport.selectRegion(index);
@@ -904,6 +906,12 @@ public class MainActivity extends Activity {
                     gameOutline.setVisibility(View.VISIBLE);
                 }
             }catch(Exception ignored){}
+            // During preset changes, follow the browser's asynchronous
+            // transform at display cadence rather than waiting for the
+            // slower ambient sampling timer.
+            if(ambientForeground&&!landscape&&!original &&
+                android.os.SystemClock.uptimeMillis()<followFrameUntil)
+                handler.postDelayed(this::refreshAmbientStage,100);
         });
     }
     private void updateAmbient(){
