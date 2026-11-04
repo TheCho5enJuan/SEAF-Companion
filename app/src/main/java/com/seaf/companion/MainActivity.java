@@ -419,6 +419,17 @@ public class MainActivity extends Activity {
         ambientView.setAlpha(1f);
         root.addView(ambientView,new FrameLayout.LayoutParams(-1,-1));
         root.addView(viewport,new FrameLayout.LayoutParams(-1,-1));
+        gameOutline=new View(this);
+        gameOutline.setClickable(false);
+        gameOutline.setFocusable(false);
+        android.graphics.drawable.GradientDrawable border=
+            new android.graphics.drawable.GradientDrawable();
+        border.setColor(Color.TRANSPARENT);
+        border.setCornerRadius(dp(13));
+        border.setStroke(dp(1),0x668CCFFF);
+        gameOutline.setBackground(border);
+        gameOutline.setVisibility(View.GONE);
+        root.addView(gameOutline,new FrameLayout.LayoutParams(1,1,Gravity.TOP|Gravity.LEFT));
         createMissionHeader();
         viewport.setModes(landscape,original,(!landscape&&!original)?(expanded?162:66):0);
         if(!original){
@@ -867,6 +878,17 @@ public class MainActivity extends Activity {
                 if(r-l<web.getWidth()*.30f||b-t<web.getHeight()*.10f)return;
                 ambientStageRect=new android.graphics.Rect(l,t,r,b);
                 ambientGeometryUpdatedAt=android.os.SystemClock.uptimeMillis();
+                if(gameOutline!=null&&root!=null&&!landscape&&!original){
+                    int[] wloc=new int[2],rloc=new int[2];
+                    web.getLocationInWindow(wloc);
+                    root.getLocationInWindow(rloc);
+                    int left=l+wloc[0]-rloc[0],top=t+wloc[1]-rloc[1];
+                    FrameLayout.LayoutParams frame=new FrameLayout.LayoutParams(
+                        Math.max(1,r-l),Math.max(1,b-t),Gravity.TOP|Gravity.LEFT);
+                    frame.leftMargin=left;frame.topMargin=top;
+                    gameOutline.setLayoutParams(frame);
+                    gameOutline.setVisibility(View.VISIBLE);
+                }
             }catch(Exception ignored){}
         });
     }
