@@ -345,6 +345,62 @@ public class MainActivity extends Activity {
                 else finishAndRemoveTask();
             }).show();
     }
+    private void createMissionHeader(){
+        if(landscape||original)return;
+        LinearLayout head=new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(dp(8),0,dp(8),0);
+        FrameLayout.LayoutParams hp=new FrameLayout.LayoutParams(-1,dp(63),Gravity.TOP);
+        hp.setMargins(dp(12),dp(35),dp(12),0);
+        ImageView icon=new ImageView(this);
+        icon.setImageResource(R.drawable.seaf_user_icon);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        head.addView(icon,new LinearLayout.LayoutParams(dp(44),dp(44)));
+        LinearLayout branding=new LinearLayout(this);
+        branding.setOrientation(LinearLayout.VERTICAL);
+        branding.setGravity(Gravity.CENTER_VERTICAL);
+        TextView brand=label("SEAF",25,true);
+        brand.setTypeface(android.graphics.Typeface.create("sans-serif-black",1));
+        brand.setLetterSpacing(.07f);
+        branding.addView(brand,new LinearLayout.LayoutParams(-1,dp(31)));
+        TextView sub=label("C O M P A N I O N",9,true);
+        sub.setTextColor(0xFFA9D8FB);
+        branding.addView(sub,new LinearLayout.LayoutParams(-1,dp(18)));
+        LinearLayout.LayoutParams names=new LinearLayout.LayoutParams(0,-1,1f);
+        names.setMargins(dp(6),0,0,0);head.addView(branding,names);
+        View rule=new View(this);rule.setBackgroundColor(0x6684ADD6);
+        LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(dp(1),dp(29));
+        rp.setMargins(dp(4),0,dp(7),0);head.addView(rule,rp);
+        TextView tagline=label("MISSION\nCONTROL",8,true);
+        tagline.setGravity(Gravity.CENTER);
+        tagline.setTextColor(0xFFD9E9F5);
+        head.addView(tagline,new LinearLayout.LayoutParams(dp(58),dp(38)));
+        CompanionChrome.Icon close=iconButton("close","Close SEAF Companion",this::closeCompanion);
+        LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(dp(39),dp(42));
+        cp.setMargins(dp(4),0,0,0);
+        head.addView(close,cp);
+        root.addView(head,hp);
+    }
+
+    private void addReferenceDockIcon(LinearLayout bar,CompanionChrome.Icon icon,
+                                      String title){
+        LinearLayout item=new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams layout=new LinearLayout.LayoutParams(0,dp(81),1);
+        layout.setMargins(dp(1),0,dp(1),0);
+        bar.addView(item,layout);
+        item.addView(icon,new LinearLayout.LayoutParams(dp(38),dp(40)));
+        TextView text=label(title,8,true);
+        text.setGravity(Gravity.CENTER);
+        text.setTextColor(0xFFE5F3FF);
+        text.setLetterSpacing(.02f);
+        LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(-1,dp(23));
+        tp.setMargins(0,dp(3),0,0);
+        item.addView(text,tp);
+        makeDraggable(icon);
+        makeDraggable(item);
+    }
     private void build(){
         handler.removeCallbacks(autoHideTask);
         autoHidden=false;
@@ -363,17 +419,18 @@ public class MainActivity extends Activity {
         ambientView.setAlpha(1f);
         root.addView(ambientView,new FrameLayout.LayoutParams(-1,-1));
         root.addView(viewport,new FrameLayout.LayoutParams(-1,-1));
+        createMissionHeader();
         viewport.setModes(landscape,original,(!landscape&&!original)?(expanded?162:66):0);
         if(!original){
             panel=new LinearLayout(this);
             panel.setOrientation(LinearLayout.VERTICAL);
-            panel.setPadding(dp(6),dp(6),dp(6),dp(6));
+            panel.setPadding(dp(7),dp(4),dp(7),dp(4));
             panel.setBackground(CompanionChrome.panel(getResources().getDisplayMetrics().density));
             panel.setElevation(dp(10));
             panel.setAlpha(hudOpacity);
             makeDraggable(panel);
             FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(
-                landscape?dp(expanded?255:76):Math.min(dp(375),getResources().getDisplayMetrics().widthPixels-dp(20)),
+                landscape?dp(expanded?255:76):Math.min(dp(480),getResources().getDisplayMetrics().widthPixels-dp(14)),
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 landscape?Gravity.RIGHT|Gravity.CENTER_VERTICAL:Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);
             params.setMargins(dp(9),0,dp(9),dp(10));
@@ -386,35 +443,45 @@ public class MainActivity extends Activity {
             bar.setGravity(Gravity.CENTER_VERTICAL);
             if(!landscape){
                 String[] kinds={"left","center","right","overview"};
-                String[] names={"Left view","Center view","Right view","Overview"};
+                String[] descriptions={"Left view","Center view","Right view","Overview"};
+                String[] names={"LEFT","CENTER","RIGHT","ALL"};
                 for(int i=0;i<4;i++){
                     final int selection=i;
-                    CompanionChrome.Icon item=iconButton(kinds[i],names[i],()->selectView(selection));
-                    makeDraggable(item);addIcon(bar,item,1);
-                    viewButtons[i]=item;
+                    CompanionChrome.Icon icon=iconButton(kinds[i],descriptions[i],()->selectView(selection));
+                    addReferenceDockIcon(bar,icon,names[i]);
+                    viewButtons[i]=icon;
                 }
-                View separator=new View(this);separator.setBackgroundColor(0x8875B5DB);
-                LinearLayout.LayoutParams divider=new LinearLayout.LayoutParams(dp(1),dp(30));
-                divider.setMargins(dp(2),0,dp(2),0);bar.addView(separator,divider);
-                CompanionChrome.Icon close=iconButton("close","Close SEAF Companion",
-                    this::closeCompanion);
-                makeDraggable(close);addIcon(bar,close,1);
+                View separator=new View(this);
+                separator.setBackgroundColor(0xAA8AAECE);
+                LinearLayout.LayoutParams divider=new LinearLayout.LayoutParams(dp(1),dp(42));
+                divider.setMargins(dp(1),0,dp(1),dp(13));
+                bar.addView(separator,divider);
                 FrameLayout bell=new FrameLayout(this);
                 CompanionChrome.Icon bellIcon=iconButton("bell","Mission reminder",this::showTimer);
                 bell.addView(bellIcon,new FrameLayout.LayoutParams(-1,-1));
                 makeDraggable(bellIcon);
-                bellBadge=label("",10,true);bellBadge.setTextColor(Color.BLACK);
-                bellBadge.setGravity(Gravity.CENTER);bellBadge.setBackgroundColor(CompanionChrome.GOLD);
-                bell.addView(bellBadge,new FrameLayout.LayoutParams(dp(17),dp(17),
+                bellBadge=label("",10,true);bellBadge.setGravity(Gravity.CENTER);
+                bellBadge.setTextColor(0xFF061424);
+                bellBadge.setBackgroundColor(CompanionChrome.GOLD);
+                bell.addView(bellBadge,new FrameLayout.LayoutParams(dp(16),dp(16),
                     Gravity.RIGHT|Gravity.TOP));
-                LinearLayout.LayoutParams bellLp=new LinearLayout.LayoutParams(0,dp(46),1);
-                bellLp.setMargins(dp(2),0,dp(2),0);bar.addView(bell,bellLp);
+                LinearLayout bellColumn=new LinearLayout(this);
+                bellColumn.setOrientation(LinearLayout.VERTICAL);
+                bellColumn.setGravity(Gravity.CENTER);
+                bar.addView(bellColumn,new LinearLayout.LayoutParams(0,dp(81),1));
+                bellColumn.addView(bell,new LinearLayout.LayoutParams(dp(38),dp(40)));
+                TextView bellLabel=label("REMIND",8,true);
+                bellLabel.setGravity(Gravity.CENTER);bellLabel.setTextColor(0xFFE5F3FF);
+                bellColumn.addView(bellLabel,new LinearLayout.LayoutParams(-1,dp(23)));
+                makeDraggable(bellColumn);
+                addReferenceDockIcon(bar,iconButton("settings","Settings",this::showSettings),"SETTINGS");
+                addReferenceDockIcon(bar,iconButton("orientation","Rotate",this::toggleOrientation),"ROTATE");
                 CompanionChrome.Icon exp=iconButton(expanded?"collapse":"expand",
                     expanded?"Collapse":"Expand",()->{
                         expanded=!expanded;getPreferences(0).edit()
                             .putBoolean("expanded",expanded).apply();build();
                     });
-                makeDraggable(exp);addIcon(bar,exp,1);
+                addReferenceDockIcon(bar,exp,expanded?"LESS":"MORE");
             }else{
                 CompanionChrome.Icon expand=iconButton(expanded?"collapse":"expand",
                     expanded?"Collapse":"Expand",()->{
