@@ -34,7 +34,11 @@ public final class CompanionChrome {
         private boolean selected;
         private boolean active;
         public Icon(Context c,String type){super(c);kind=type;setLayerType(View.LAYER_TYPE_SOFTWARE,null);}
-        public void setSelectedState(boolean value){selected=value;invalidate();}
+        public void setSelectedState(boolean value){
+            selected=value;
+            setBackground(CompanionChrome.glass(getResources().getDisplayMetrics().density,value));
+            invalidate();
+        }
         public void setActive(boolean value){active=value;invalidate();}
         private void line(Canvas c,float a,float b,float x,float y){
             c.drawLine(a,b,x,y,p);
