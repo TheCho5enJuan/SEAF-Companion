@@ -563,9 +563,18 @@ public class MainActivity extends Activity {
     }
     private void selectView(int index){
         if(viewport==null||landscape||original)return;
+        // The game transform changes asynchronously inside Chromium.
+        // Discard the old box immediately, then synchronize the native
+        // frame after the WebView finishes applying the new preset.
+        ambientStageRect=null;
+        ambientGeometryUpdatedAt=0;
+        if(gameOutline!=null)gameOutline.setVisibility(View.GONE);
         if(index==3)viewport.showOverview();
         else viewport.selectRegion(index);
         updateViewButtons();
+        handler.postDelayed(this::refreshAmbientStage,50);
+        handler.postDelayed(this::refreshAmbientStage,180);
+        handler.postDelayed(this::refreshAmbientStage,420);
     }
     private void updateViewButtons(){
         if(viewport==null)return;
@@ -878,6 +887,9 @@ public class MainActivity extends Activity {
                 l=Math.max(0,l);t=Math.max(0,t);
                 r=Math.min(web.getWidth(),r);b=Math.min(web.getHeight(),b);
                 if(r-l<web.getWidth()*.30f||b-t<web.getHeight()*.10f)return;
+                // Do not paint the frame before the new stage transform is
+                // visibly committed; keep its bounds synchronized with the
+                // actual rendered stage rather than an old capture.
                 ambientStageRect=new android.graphics.Rect(l,t,r,b);
                 ambientGeometryUpdatedAt=android.os.SystemClock.uptimeMillis();
                 if(gameOutline!=null&&root!=null&&!landscape&&!original){
@@ -899,7 +911,7 @@ public class MainActivity extends Activity {
            ambientView.getVisibility()!=View.VISIBLE||web.getWidth()<1||
            web.getHeight()<1||exiting)return;
         long now=android.os.SystemClock.uptimeMillis();
-        if(ambientStageRect==null||now-ambientGeometryUpdatedAt>4500){
+        if(ambientStageRect==null||now-ambientGeometryUpdatedAt>1400){
             refreshAmbientStage();
             if(ambientStageRect==null){scheduleNextAmbient(1000);return;}
         }
