@@ -15,7 +15,7 @@ import android.view.View;
  * can ever appear in the backdrop. Colors crossfade gently.
  */
 public final class AmbientGlowView extends View {
-    private static final int BASE=Color.rgb(5,10,22);
+    private static final int BASE=Color.rgb(9,17,35);
     private final Paint paint=new Paint(3);
     private final int[] color={0xFF17487D,0xFF574B8B,0xFFAF704A,0xFF123D7C};
     private final int[] start=color.clone();
@@ -31,9 +31,9 @@ public final class AmbientGlowView extends View {
     }
     private static int tone(int raw){
         // Preserve hue but lower contrast and brightness for a dark ambient background.
-        int r=Math.min(210,Math.round(Color.red(raw)*.62f+8));
-        int g=Math.min(190,Math.round(Color.green(raw)*.59f+10));
-        int b=Math.min(220,Math.round(Color.blue(raw)*.66f+19));
+        int r=Math.min(225,Math.round(Color.red(raw)*.93f+17));
+        int g=Math.min(215,Math.round(Color.green(raw)*.90f+19));
+        int b=Math.min(240,Math.round(Color.blue(raw)*.96f+30));
         return Color.rgb(r,g,b);
     }
     public void acceptSample(android.graphics.Bitmap image){
@@ -70,9 +70,9 @@ public final class AmbientGlowView extends View {
         animation.start();
     }
     private void glow(Canvas canvas,float x,float y,float radius,int color,float strength){
-        int inner=Color.argb(Math.round(120*strength),
+        int inner=Color.argb(Math.round(216*strength),
             Color.red(color),Color.green(color),Color.blue(color));
-        int middle=Color.argb(Math.round(48*strength),
+        int middle=Color.argb(Math.round(122*strength),
             Color.red(color),Color.green(color),Color.blue(color));
         paint.setShader(new RadialGradient(x,y,radius,
             new int[]{inner,middle,Color.TRANSPARENT},
@@ -85,12 +85,12 @@ public final class AmbientGlowView extends View {
         canvas.drawColor(BASE);
         float w=getWidth(),h=getHeight();
         if(w<=0||h<=0)return;
-        float radius=Math.max(w*.75f,h*.38f);
-        glow(canvas,w*.16f,h*.28f,radius,color[0],.78f);
-        glow(canvas,w*.82f,h*.34f,radius,color[1],.68f);
-        glow(canvas,w*.81f,h*.72f,radius,color[2],.64f);
-        glow(canvas,w*.15f,h*.69f,radius,color[3],.7f);
-        paint.setColor(0x66030B19);
+        float radius=Math.max(w*.91f,h*.46f);
+        glow(canvas,w*.16f,h*.28f,radius,color[0],1.00f);
+        glow(canvas,w*.82f,h*.34f,radius,color[1],.94f);
+        glow(canvas,w*.81f,h*.72f,radius,color[2],.92f);
+        glow(canvas,w*.15f,h*.69f,radius,color[3],.94f);
+        paint.setColor(0x19030B19);
         canvas.drawRect(0,0,w,h,paint);
     }
     public void stop(){if(animation!=null)animation.cancel();}
